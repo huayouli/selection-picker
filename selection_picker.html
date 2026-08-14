@@ -1,0 +1,1747 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>每日选品可视化工作台</title>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <style>
+    :root {
+      --ink: #eaf2ff;
+      --muted: #8fa3c7;
+      --paper: #070b16;
+      --paper-2: #0c1222;
+      --card: #10182a;
+      --line: rgba(128, 163, 255, .22);
+      --burnt: #7c5cff;
+      --burnt-dark: #35d5ff;
+      --green: #2ff0a8;
+      --blue: #35d5ff;
+      --red: #ff4d7d;
+      --yellow: #f4c95d;
+      --shadow: 0 18px 52px rgba(0, 0, 0, .34);
+      --radius: 22px;
+      --panel: rgba(12, 18, 34, .86);
+      --panel-strong: rgba(16, 24, 42, .96);
+      --glow: 0 0 0 1px rgba(53,213,255,.16), 0 18px 55px rgba(13, 26, 58, .52);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% -10%, rgba(124, 92, 255, .36), transparent 34%),
+        radial-gradient(circle at 90% 2%, rgba(47, 240, 168, .16), transparent 28%),
+        linear-gradient(135deg, #060914 0%, #090f20 48%, #03050c 100%);
+      min-height: 100vh;
+    }
+    body:before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .34;
+      background-image: linear-gradient(rgba(143,163,199,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(143,163,199,.08) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(circle at top, #000 0%, transparent 72%);
+    }
+    button, input, select { font: inherit; }
+    .app { max-width: 1680px; margin: 0 auto; padding: 22px clamp(14px, 2.3vw, 32px) 44px; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(360px, 1fr) minmax(420px, .9fr);
+      gap: clamp(16px, 3vw, 44px);
+      align-items: stretch;
+      padding: 18px 0 20px;
+    }
+    .eyebrow { letter-spacing: .2em; color: var(--blue); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    h1 { margin: 10px 0 12px; font-size: clamp(34px, 5vw, 72px); line-height: .96; letter-spacing: -.055em; max-width: 920px; }
+    .lead { margin: 0; color: var(--muted); font-size: clamp(14px, 1.25vw, 18px); line-height: 1.7; max-width: 780px; }
+    .upload-panel {
+      background: linear-gradient(145deg, rgba(16,24,42,.94), rgba(7,11,22,.86));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--glow);
+      position: relative;
+      overflow: hidden;
+    }
+    .upload-panel:before {
+      content: ""; position: absolute; inset: -40% -12% auto auto; width: 280px; height: 280px;
+      background: conic-gradient(from 210deg, transparent, rgba(53,213,255,.26), rgba(124,92,255,.28), transparent 72%);
+      filter: blur(2px); opacity: .9; border-radius: 50%;
+    }
+    .drop {
+      position: relative;
+      border: 1px dashed rgba(53,213,255,.42);
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(53,213,255,.08), rgba(124,92,255,.08));
+      padding: 22px;
+      min-height: 126px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+      cursor: pointer;
+    }
+    .drop.drag { background: rgba(53,213,255,.14); transform: translateY(-2px); border-color: var(--green); }
+    .drop strong { display: block; font-size: 20px; margin-bottom: 6px; }
+    .drop span { color: var(--muted); line-height: 1.5; font-size: 13px; }
+    .drop input { display: none; }
+    .toolbar { position: relative; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+    .btn {
+      border: 0; border-radius: 999px; padding: 10px 14px; cursor: pointer;
+      background: linear-gradient(135deg, var(--blue), var(--burnt)); color: #06101f; font-weight: 850;
+      box-shadow: 0 12px 28px rgba(53,213,255,.16);
+      transition: transform .15s ease, opacity .15s ease, filter .15s ease;
+    }
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    .btn.secondary { background: rgba(143,163,199,.12); color: var(--ink); box-shadow: none; border: 1px solid var(--line); }
+    .btn.warn { background: linear-gradient(135deg, #2ff0a8, #35d5ff); color: #04111c; }
+    .btn.danger { background: linear-gradient(135deg, #ff4d7d, #7c5cff); color: #fff; }
+    .btn:disabled { opacity: .42; cursor: not-allowed; transform: none; filter: none; }
+    .select, .filter-select {
+      border: 1px solid var(--line); border-radius: 999px; padding: 9px 12px; background: #0b1324; color: var(--ink);
+    }
+    .stats {
+      display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; margin: 12px 0 18px;
+    }
+    .stat {
+      border: 1px solid var(--line); background: rgba(16,24,42,.78); border-radius: 16px; padding: 12px 14px;
+    }
+    .stat b { display: block; font-size: 24px; letter-spacing: -.045em; color: var(--ink); }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .priority-panel {
+      display: grid; grid-template-columns: .78fr 1.22fr; gap: 12px; margin: 0 0 16px;
+    }
+    .coverage-card, .choice-card {
+      border: 1px solid var(--line); background: var(--panel); border-radius: 18px; padding: 13px; box-shadow: var(--shadow);
+    }
+    .coverage-title { display: flex; justify-content: space-between; gap: 10px; align-items: start; margin-bottom: 10px; }
+    .coverage-title strong { font-size: 16px; }
+    .coverage-title span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .target-grid { display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: 8px; }
+    .target { border-radius: 14px; background: rgba(244,201,93,.08); border: 1px solid rgba(244,201,93,.25); padding: 10px; }
+    .target b { display: block; font-size: 22px; letter-spacing: -.04em; }
+    .target span { color: var(--muted); font-size: 11px; }
+    .target.ok { background: rgba(47,240,168,.1); border-color: rgba(47,240,168,.34); }
+    .target.warn { background: rgba(244,201,93,.08); border-color: rgba(244,201,93,.28); }
+    .choice-wrap { min-width: 0; }
+    .choice-sections { display: grid; grid-template-columns: repeat(3, minmax(132px, 1fr)); gap: 8px; }
+    .choice-card { box-shadow: none; cursor: pointer; transition: transform .15s ease, border-color .15s ease, background .15s ease; }
+    .choice-card:hover { transform: translateY(-2px); border-color: rgba(53,213,255,.65); background: rgba(53,213,255,.07); }
+    .choice-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .choice-card span { color: var(--muted); font-size: 11px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .choice-card b { display: block; margin-top: 6px; color: var(--green); font-size: 12px; }
+    .assist-note { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .workbench { display: grid; grid-template-columns: 292px 1fr; gap: 14px; align-items: start; }
+    .side, .main { background: rgba(10,16,30,.86); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .side { padding: 14px; position: sticky; top: 14px; }
+    .side h2, .main h2 { margin: 0 0 10px; font-size: 18px; letter-spacing: -.02em; }
+    .style-list { display: grid; gap: 8px; margin-bottom: 14px; }
+    .style-card { border: 1px solid var(--line); background: rgba(16,24,42,.78); border-radius: 15px; padding: 10px; cursor: pointer; transition: transform .15s ease, border-color .15s ease, background .15s ease; }
+    .style-card:hover { transform: translateY(-1px); border-color: rgba(53,213,255,.55); }
+    .style-card.active { outline: 1px solid var(--blue); background: rgba(53,213,255,.1); box-shadow: 0 0 0 3px rgba(53,213,255,.08); }
+    .style-title { display: flex; justify-content: space-between; gap: 8px; align-items: start; font-weight: 900; font-size: 13px; }
+    .style-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 8px; }
+    .style-metrics span { border-radius: 999px; background: rgba(143,163,199,.12); color: var(--muted); font-size: 10px; padding: 3px 5px; text-align: center; }
+    .style-card.done .style-metrics span { background: rgba(47,240,168,.12); color: var(--green); }
+    .account-heading { margin-top: 4px !important; }
+    .account-list { display: grid; gap: 8px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+    .account {
+      border: 1px solid var(--line); background: rgba(16,24,42,.7); border-radius: 14px; padding: 10px; cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .account.active { outline: 1px solid var(--green); background: rgba(47,240,168,.08); }
+    .account-top { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+    .account-name { font-weight: 850; font-size: 13px; }
+    .tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 7px; font-size: 11px; background: rgba(53,213,255,.12); color: var(--blue); white-space: nowrap; }
+    .progress { height: 5px; background: rgba(143,163,199,.16); border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+    .bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--green), var(--blue)); transition: width .3s ease; }
+    .small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .main { padding: 14px; min-height: 620px; }
+    .main-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 12px; }
+    .filters { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+    .pill {
+      border: 1px solid var(--line); border-radius: 999px; padding: 7px 10px; background: rgba(143,163,199,.1); cursor: pointer; color: var(--muted);
+      transition: transform .12s ease, background .12s ease, border-color .12s ease, color .12s ease; font-size: 12px;
+    }
+    .pill:hover { transform: translateY(-1px); border-color: rgba(53,213,255,.5); color: var(--ink); }
+    .pill.active { background: rgba(53,213,255,.16); color: var(--blue); border-color: rgba(53,213,255,.58); }
+    .pill.active::before { content: '✓ '; font-weight: 900; }
+    .pill.clear { border-style: dashed; background: transparent; }
+    .filter-select { min-width: 100px; font-size: 12px; }
+    .search-panel {
+      margin-top: 10px; display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 8px; align-items: center;
+      border: 1px solid rgba(53,213,255,.2); border-radius: 16px; padding: 8px;
+      background: linear-gradient(135deg, rgba(53,213,255,.08), rgba(124,92,255,.07));
+    }
+    .search-box { position: relative; min-width: 0; }
+    .search-box::before { content: 'SEARCH'; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--blue); font-size: 10px; font-weight: 900; letter-spacing: .09em; pointer-events: none; }
+    .search-input {
+      width: 100%; box-sizing: border-box; border: 1px solid rgba(143,163,199,.2); border-radius: 999px; padding: 10px 12px 10px 66px;
+      background: rgba(5,10,20,.82); color: var(--ink); outline: none; font-size: 13px;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .search-input:focus { border-color: rgba(53,213,255,.68); box-shadow: 0 0 0 3px rgba(53,213,255,.1); background: rgba(8,13,25,.96); }
+    .search-input::placeholder { color: rgba(145,162,189,.72); }
+    .search-meta { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .search-panel .mini-btn { padding: 8px 12px; background: rgba(8,13,25,.76); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 9px; }
+    .product {
+      background: linear-gradient(180deg, rgba(16,24,42,.96), rgba(8,13,25,.98)); border: 1px solid rgba(128,163,255,.18); border-radius: 15px; overflow: hidden;
+      position: relative; transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease; cursor: pointer;
+    }
+    .product:hover { transform: translateY(-2px); border-color: rgba(53,213,255,.52); box-shadow: 0 14px 34px rgba(0,0,0,.34); }
+    .product.checked { border-color: var(--green); box-shadow: 0 0 0 1px rgba(47,240,168,.38), 0 16px 34px rgba(47,240,168,.1); }
+    .product.checked:after { content: '已选'; position: absolute; top: 8px; right: 8px; border-radius: 999px; padding: 4px 7px; background: var(--green); color: #03130e; font-size: 11px; font-weight: 900; }
+    .product.picked-elsewhere { border-color: rgba(244,201,93,.62); }
+    .picked-note {
+      margin: 6px 0 0; border-radius: 10px; padding: 5px 7px; background: rgba(244,201,93,.1); color: #f4c95d;
+      font-size: 11px; font-weight: 800; line-height: 1.25; border: 1px solid rgba(244,201,93,.22);
+    }
+    .imgbox { aspect-ratio: 1 / 1; background: linear-gradient(135deg, rgba(53,213,255,.12), rgba(124,92,255,.12)); display: grid; place-items: center; overflow: hidden; }
+    .imgbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .noimg { color: var(--muted); font-size: 12px; }
+    .product-body { padding: 9px; }
+    .product-title { font-weight: 850; line-height: 1.25; min-height: 34px; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .meta { display: flex; flex-wrap: wrap; gap: 4px; margin: 7px 0; max-height: 48px; overflow: hidden; }
+    .chip { font-size: 10px; padding: 3px 5px; border-radius: 999px; background: rgba(143,163,199,.13); color: var(--muted); }
+    .chip.good { background: rgba(47,240,168,.13); color: var(--green); }
+    .chip.bad { background: rgba(255,77,125,.13); color: #ff8aa9; }
+    .reason { color: var(--muted); font-size: 11px; line-height: 1.35; min-height: 30px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .checkline { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 8px; }
+    .pickhint { color: var(--blue); font-size: 11px; font-weight: 850; }
+    .score { font-size: 11px; color: var(--green); font-weight: 900; }
+    .empty {
+      border: 1px dashed rgba(53,213,255,.38); border-radius: 18px; padding: 38px; text-align: center; color: var(--muted); background: rgba(53,213,255,.05);
+    }
+    .selected-panel {
+      display: none; margin: 0 0 12px; border: 1px solid rgba(53,213,255,.24); border-radius: 18px;
+      background: linear-gradient(180deg, rgba(16,24,42,.92), rgba(8,13,25,.94)); overflow: hidden;
+    }
+    .selected-panel.show { display: block; }
+    .selected-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px 13px; border-bottom: 1px solid var(--line); }
+    .selected-head strong { font-size: 15px; }
+    .selected-head span { color: var(--muted); font-size: 12px; }
+    .selected-list { display: grid; gap: 10px; max-height: 460px; overflow: auto; padding: 12px; }
+    .selected-group { display: grid; gap: 7px; }
+    .selected-group-title { color: var(--blue); font-size: 12px; font-weight: 900; letter-spacing: .02em; }
+    .selected-item {
+      display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; border: 1px solid rgba(143,163,199,.14);
+      border-radius: 14px; padding: 8px; background: rgba(143,163,199,.07);
+    }
+    .selected-thumb { width: 62px; aspect-ratio: 1 / 1; border-radius: 11px; overflow: hidden; background: rgba(53,213,255,.08); display: grid; place-items: center; color: var(--muted); font-size: 10px; }
+    .selected-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .selected-info { min-width: 0; }
+    .selected-title { font-weight: 850; font-size: 13px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .selected-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .selected-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+    .mini-btn { border: 1px solid var(--line); border-radius: 999px; background: rgba(143,163,199,.1); color: var(--ink); padding: 6px 9px; cursor: pointer; font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .mini-btn:hover { border-color: rgba(53,213,255,.55); color: var(--blue); }
+    .mapping {
+      display: none; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;
+    }
+    .mapping.show { display: grid; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+    .field select { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 9px; background: #0b1324; color: var(--ink); }
+    .config-panel {
+      display: none; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; gap: 12px;
+    }
+    .config-panel.show { display: grid; }
+    .config-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+    .config-head strong { display: block; font-size: 16px; }
+    .config-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .config-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .config-section { border: 1px solid rgba(143,163,199,.16); border-radius: 16px; padding: 12px; background: rgba(16,24,42,.62); }
+    .config-section-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .config-section-title strong { font-size: 14px; }
+    .config-section-title span { color: var(--muted); font-size: 11px; }
+    .config-rows { display: grid; gap: 8px; }
+    .config-row { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(72px, .55fr)) auto; gap: 8px; align-items: end; padding: 8px; border-radius: 14px; background: rgba(5,10,20,.42); border: 1px solid rgba(143,163,199,.12); }
+    .config-row.account-row { grid-template-columns: 1.35fr 1fr repeat(3, minmax(72px, .55fr)) .75fr .75fr auto; }
+    .config-field label { display: block; color: var(--muted); font-size: 10px; margin: 0 0 4px; white-space: nowrap; }
+    .config-field input, .config-field select {
+      width: 100%; box-sizing: border-box; border: 1px solid rgba(143,163,199,.22); border-radius: 11px; padding: 8px 9px;
+      background: rgba(5,10,20,.88); color: var(--ink); outline: none; font-size: 12px;
+    }
+    .config-field input:focus, .config-field select:focus { border-color: rgba(53,213,255,.62); box-shadow: 0 0 0 3px rgba(53,213,255,.08); }
+    .config-derived { color: var(--green); font-size: 10px; margin-top: 4px; white-space: nowrap; }
+    .config-remove { align-self: end; border-color: rgba(255,77,125,.28); color: #ff8aa9; }
+    .toast { position: fixed; right: 18px; bottom: 18px; background: #111b30; color: var(--ink); padding: 12px 15px; border-radius: 14px; box-shadow: var(--shadow); opacity: 0; transform: translateY(12px); pointer-events: none; transition: .2s ease; z-index: 50; border: 1px solid var(--line); }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    @media (max-width: 1100px) {
+      .hero, .workbench, .priority-panel { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .choice-sections { grid-template-columns: repeat(2, 1fr); }
+      .main-head { display: block; }
+      .filters { justify-content: flex-start; margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">DAILY SELECTION ATELIER</div>
+        <h1>每日选品可视化工作台</h1>
+        <p class="lead">上传非红框品池表格后，系统会先按风格线指标控量，再按账号坑位、蓝海数量、近期低价数量和 GMV / 增速优先级自动推荐。你只需要先选风格线、再选账号、看图勾选、导出。</p>
+      </div>
+      <div class="upload-panel">
+        <label class="drop" id="dropZone">
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+          <div>
+            <strong>拖入今日品池表格</strong>
+            <span>支持 xlsx / xls / csv。优先读取图片URL列；如果 xlsx 里是嵌入图片，也会尝试按行自动识别。PID、GMV、增速、蓝海、低价字段可自动识别或手动映射。</span>
+          </div>
+        </label>
+        <div class="toolbar">
+          <button class="btn" id="autoBtn" disabled>自动匹配推荐</button>
+          <button class="btn secondary" id="mappingBtn" disabled>字段映射</button>
+          <button class="btn secondary" id="configBtn">配置选品规则</button>
+          <button class="btn secondary" id="sampleBtn">加载示例</button>
+          <button class="btn danger" id="clearSelectedBtn" disabled>一键清空选品</button>
+          <button class="btn secondary" id="undoClearBtn" disabled>撤回清空</button>
+          <button class="btn secondary" id="clearCurrentAccountBtn" disabled>清空当前账号</button>
+          <button class="btn secondary" id="selectedPanelBtn" disabled>查看已选品</button>
+          <button class="btn warn" id="exportBtn" disabled>导出今日选品</button>
+          <select class="select" id="exportMode">
+            <option value="xlsx">导出 Excel：带图片缩略图</option>
+            <option value="csvzip">分别导出 CSV</option>
+            <option value="html">导出 HTML：带图片预览清单</option>
+          </select>
+        </div>
+        <div class="mapping" id="mappingBox"></div>
+        <div class="config-panel" id="configPanel"></div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><b id="statProducts">0</b><span>已读取商品</span></div>
+      <div class="stat"><b id="statSelected">0 / 42</b><span>已勾选 / 总坑位</span></div>
+      <div class="stat"><b id="statBlue">0%</b><span>蓝海覆盖</span></div>
+      <div class="stat"><b id="statLow">0%</b><span>近期低价覆盖</span></div>
+      <div class="stat"><b id="statReady">未开始</b><span>锁品状态</span></div>
+    </section>
+
+    <section class="priority-panel">
+      <div class="coverage-card">
+        <div class="coverage-title">
+          <div>
+            <strong>覆盖优先级</strong>
+            <span>先按当前风格线截图指标控量：发稿、蓝海、低价都不能超过目标；完成时蓝海和低价数量必须精准命中。</span>
+          </div>
+        </div>
+        <div class="target-grid">
+          <div class="target warn" id="targetBlue"><b id="targetBluePct">0 / 0</b><span id="targetBlueHint">当前风格线蓝海目标</span></div>
+          <div class="target warn" id="targetLow"><b id="targetLowPct">0 / 0</b><span id="targetLowHint">当前风格线低价目标</span></div>
+        </div>
+      </div>
+      <div class="choice-wrap">
+        <div class="choice-sections">
+          <div class="choice-card" data-jump-filter="nonBlue">
+            <strong>非蓝海专区</strong>
+            <span>包含表格里的非蓝海、非蓝海浅蓝；蓝海指标不会增加。</span>
+            <b id="nonBlueCount">0 个候选</b>
+          </div>
+          <div class="choice-card" data-jump-filter="blue">
+            <strong>蓝海专区</strong>
+            <span>表格里的蓝海、浅蓝、浅海都计入蓝海。</span>
+            <b id="blueCount">0 个候选</b>
+          </div>
+          <div class="choice-card" data-jump-filter="low">
+            <strong>低价专区</strong>
+            <span>计入近期低价指标的商品。</span>
+            <b id="lowCount">0 个候选</b>
+          </div>
+          <div class="choice-card" data-jump-filter="nonLow">
+            <strong>非低价专区</strong>
+            <span>不计入近期低价指标的商品。</span>
+            <b id="nonLowCount">0 个候选</b>
+          </div>
+          <div class="choice-card" data-jump-filter="p0">
+            <strong>P0品</strong>
+            <span>只读取表格里的 P0/P1 标签字段；字段写 P0 才算 P0。</span>
+            <b id="p0Count">0 个候选</b>
+          </div>
+          <div class="choice-card" data-jump-filter="p1">
+            <strong>P1品</strong>
+            <span>只读取表格里的 P0/P1 标签字段；字段写 P1 才算 P1。</span>
+            <b id="p1Count">0 个候选</b>
+          </div>
+        </div>
+        <div class="assist-note">P0/P1 不再按算法分、爆品、短视频占比推断，只认原始表格字段；蓝海、低价仍按当前风格线指标独立硬控。</div>
+      </div>
+    </section>
+
+    <section class="workbench">
+      <aside class="side">
+        <h2>先选风格线</h2>
+        <div class="style-list" id="styleList"></div>
+        <h2 class="account-heading">再选账号</h2>
+        <div class="account-list" id="accountList"></div>
+      </aside>
+      <main class="main">
+        <div class="main-head">
+          <div>
+            <h2 id="currentTitle">等待上传品池</h2>
+            <div class="small" id="currentHint">上传后先选风格线，再选择该风格线下账号进行勾选。</div>
+            <div class="small" id="filterHint">筛选可多选；同组互斥项会自动替换。</div>
+          </div>
+          <div class="filters">
+            <button class="pill" data-filter="blue">蓝海专区</button>
+            <button class="pill" data-filter="nonBlue">非蓝海专区</button>
+            <button class="pill" data-filter="low">低价专区</button>
+            <button class="pill" data-filter="nonLow">非低价专区</button>
+            <button class="pill" data-filter="p0">P0品</button>
+            <button class="pill" data-filter="p1">P1品</button>
+            <button class="pill clear" data-clear-filters="1">清空筛选</button>
+            <select class="filter-select" id="marketFilter" title="货盘"><option value="all">全部货盘</option><option value="DE">DE货盘</option><option value="US">US货盘</option></select>
+            <select class="filter-select" id="sizeFilter" title="尺码"><option value="all">全部尺码</option><option value="大码">大码</option><option value="标码">标码</option></select>
+            <select class="filter-select" id="productTypeFilter" title="品类"><option value="all">全部品类</option><option value="女装">女装</option><option value="鞋包">鞋包</option></select>
+            <div class="search-panel">
+              <div class="search-box">
+                <input class="search-input" id="searchInput" type="search" placeholder="搜 PID、商品名、标签/类目、账号、风格线、货盘、尺码、品类、P0/P1" autocomplete="off" />
+              </div>
+              <button class="mini-btn" id="clearSearchBtn" type="button">清空搜索</button>
+              <div class="search-meta" id="searchResultText">搜索会和当前筛选叠加；多个关键词用空格分隔。</div>
+            </div>
+          </div>
+        </div>
+        <section class="selected-panel" id="selectedPanel">
+          <div class="selected-head">
+            <strong>已选品清单</strong>
+            <span id="selectedSummaryText">按风格线 / 账号汇总已选商品</span>
+          </div>
+          <div class="selected-list" id="selectedList"></div>
+        </section>
+        <div id="productGrid" class="grid"></div>
+      </main>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+let accounts = [
+  {style:'甜辣风', group:'甜美线1', short:'元气', name:'元气少女', quota:3, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, keywords:['元气','少女','校园','甜美']},
+  {style:'甜辣风', group:'甜美线1', short:'女明星', name:'女明星', quota:3, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, keywords:['女明星','明星','glam','甜辣']},
+  {style:'甜辣风', group:'甜美线1', short:'性感', name:'性感女人', quota:3, allowNonLow:1, allowNonBlue:0, requiredNonLow:1, requiredNonBlue:0, keywords:['性感','辣妹','bodycon']},
+  {style:'甜辣风', group:'甜美线1', short:'丰满辣妹', name:'丰满甜辣女装', quota:2, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['丰满','plus','curvy','辣妹']},
+  {style:'甜辣风', group:'甜美线1', short:'大学生', name:'大学生', quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['大学生','校园','学生']},
+  {style:'Modest Daily', group:'Modest线', short:'单', name:'单亲妈妈', quota:2, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['妈妈','mom','单亲','舒适']},
+  {style:'Modest Daily', group:'Modest线', short:'胖', name:'反容貌焦虑胖女', quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['胖','plus','焦虑','显瘦','反容貌']},
+  {style:'Modest Daily', group:'Modest线', short:'zara', name:'zara简约女', quota:1, allowNonLow:1, allowNonBlue:0, requiredNonLow:1, requiredNonBlue:0, keywords:['zara','简约','通勤','daily']},
+  {style:'Modest Daily', group:'Modest线', short:'牛仔', name:'牛仔号', quota:3, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, keywords:['牛仔','denim','jeans','牛仔裤','牛仔外套']},
+  {style:'Modest Daily', group:'Modest线', short:'普/ai', name:'普通人改造（ai摊牌）', quota:2, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['普通人','改造','ai','摊牌','daily','基础']},
+  {style:'Modest Daily', group:'Modest线', short:'图/包', name:'女教师（箱包）', quota:1, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, forceNonLow:true, forceNonBlue:true, keywords:['教师','teacher','箱包','包','bag']},
+  {style:'Modest Daily', group:'Modest线', short:'鞋/35+', name:'35+flattering（鞋靴）', quota:2, allowNonLow:2, allowNonBlue:2, requiredNonLow:2, requiredNonBlue:2, forceNonLow:true, forceNonBlue:true, keywords:['35+','flattering','鞋','靴','shoe','boots']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'美成', name:'美国成熟女', quota:3, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, keywords:['美国','成熟','优雅','us']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'穆斯', name:'穆斯林', quota:3, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['穆斯林','muslim','modest','hijab']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'御姐', name:'35岁御姐（内睡）', quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['御姐','内睡','sleep','35']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'德互', name:'德国互动女', quota:3, allowNonLow:1, allowNonBlue:1, requiredNonLow:1, requiredNonBlue:1, keywords:['德国','德区','互动','de','germany','deutsch']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'德假', name:'德国度假女', quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['德国','德区','度假','旅行','vacation','holiday','de']},
+  {style:'成熟优雅风', group:'成熟优雅线', short:'美假', name:'美国度假女', quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:['美国','美区','度假','旅行','vacation','holiday','us']},
+  {style:'跨风格引流型', group:'跨风格线', short:'拉冲号', name:'拉丁裔冲突号', quota:2, allowNonLow:1, allowNonBlue:0, requiredNonLow:1, requiredNonBlue:0, keywords:['拉丁','latina','冲突','引流']},
+  {style:'跨风格引流型', group:'跨风格线', short:'测评', name:'测评号', quota:2, allowNonLow:2, allowNonBlue:2, requiredNonLow:2, requiredNonBlue:2, forceNonLow:true, forceNonBlue:true, keywords:['测评','review','try on']},
+  {style:'跨风格引流型', group:'跨风格线', short:'ai', name:'ai摊牌号（跨风格）', quota:2, allowNonLow:1, allowNonBlue:0, requiredNonLow:1, requiredNonBlue:0, keywords:['ai','摊牌','跨风格']}
+];
+const defaultAccounts = accounts.map(acc => ({...acc, keywords:[...(acc.keywords || [])]}));
+const defaultStyleTargets = {
+  '甜辣风': {label:'甜辣风', posts:12, blue:5, low:6},
+  'Modest Daily': {label:'Modest Daily', posts:12, blue:3, low:6},
+  '成熟优雅风': {label:'成熟优雅风', posts:12, blue:6, low:6},
+  '跨风格引流型': {label:'跨风格引流型（不含混剪）', posts:6, blue:2, low:3}
+};
+let styleTargets = cloneStyleTargets(defaultStyleTargets);
+let styleOrder = Object.keys(styleTargets);
+function cloneAccounts(list=accounts){ return list.map(acc => ({...acc, keywords:[...(acc.keywords || [])]})); }
+function cloneStyleTargets(src=styleTargets){ return Object.fromEntries(Object.entries(src).map(([k,v]) => [k, {...v}])); }
+function getTotalQuota(){ return accounts.reduce((sum, acc) => sum + Number(acc.quota || 0), 0); }
+
+const wantedFields = [
+  ['pid','PID'], ['title','商品名称'], ['image','图片URL'], ['gmv','GMV'], ['growth','增速'], ['style','风格线'], ['account','账号'], ['blue','是否蓝海/浅海'], ['low','是否近期低价'], ['pTag','P0/P1标签'], ['algoScore','算法分'], ['videoShare','短视频占比'], ['lifecycle','爆品/生命周期标签'], ['market','货盘DE/US'], ['sizeType','大码/标码'], ['productType','鞋包/女装']
+];
+let rawRows = [], products = [], mapping = {}, selected = new Map(), lastClearedSelected = null, selectedPanelOpen = false, currentStyle = styleOrder[0], currentAccount = accounts.find(a => a.style === currentStyle) || accounts[0], activeFilters = new Set([]), searchQuery = '', marketFilterValue = 'all', sizeFilterValue = 'all', productTypeFilterValue = 'all', embeddedImagesByRow = {}, embeddedImageUrls = [];
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
+function norm(v){ return String(v ?? '').trim(); }
+function esc(v){ return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function urlFromText(v){ const m = norm(v).match(/https?:\/\/[^\s"'<>]+/i); return m ? m[0] : ''; }
+function numInput(v, fallback=0){
+  const n = Number(String(v ?? '').replace(/[^0-9.-]/g,''));
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : fallback;
+}
+function syncCurrentConfig(){
+  styleOrder = Object.keys(styleTargets);
+  if (!styleOrder.length) {
+    styleTargets = {'默认风格线': {label:'默认风格线', posts:0, blue:0, low:0}};
+    styleOrder = Object.keys(styleTargets);
+  }
+  currentStyle = styleOrder.includes(currentStyle) ? currentStyle : styleOrder[0];
+  currentAccount = accounts.find(a => a.name === currentAccount?.name && a.style === currentStyle) || accounts.find(a => a.style === currentStyle) || accounts[0] || {name:'未配置账号', style:currentStyle, quota:0, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:[]};
+}
+function styleConfigRowHtml(style='', target={}){
+  const posts = numInput(target.posts, 0);
+  const blue = numInput(target.blue, 0);
+  const low = numInput(target.low, 0);
+  return `<div class="config-row style-row" data-config-style-row>
+    <div class="config-field"><label>风格线名称</label><input data-style-name value="${esc(style)}" placeholder="例如 甜辣风"></div>
+    <div class="config-field"><label>总选品数</label><input data-style-posts type="number" min="0" value="${posts}"></div>
+    <div class="config-field"><label>蓝海品数</label><input data-style-blue type="number" min="0" value="${blue}"><div class="config-derived">非蓝海 ${Math.max(0, posts - blue)}</div></div>
+    <div class="config-field"><label>低价品数</label><input data-style-low type="number" min="0" value="${low}"><div class="config-derived">非低价 ${Math.max(0, posts - low)}</div></div>
+    <div class="config-field"><label>展示名</label><input data-style-label value="${esc(target.label || style)}" placeholder="侧边栏显示名"></div>
+    <button class="mini-btn config-remove" type="button" data-remove-style>删除</button>
+  </div>`;
+}
+function accountConfigRowHtml(acc={}){
+  const styleOptions = styleOrder.map(style => `<option value="${esc(style)}" ${style === acc.style ? 'selected' : ''}>${esc(style)}</option>`).join('');
+  return `<div class="config-row account-row" data-config-account-row>
+    <div class="config-field"><label>账号名称</label><input data-account-name value="${esc(acc.name || '')}" placeholder="例如 元气少女"></div>
+    <div class="config-field"><label>所属风格线</label><select data-account-style>${styleOptions}</select></div>
+    <div class="config-field"><label>账号选品数</label><input data-account-quota type="number" min="0" value="${numInput(acc.quota, 0)}"></div>
+    <div class="config-field"><label>非蓝海数</label><input data-account-nonblue type="number" min="0" value="${numInput(acc.requiredNonBlue ?? acc.allowNonBlue, 0)}"></div>
+    <div class="config-field"><label>非低价数</label><input data-account-nonlow type="number" min="0" value="${numInput(acc.requiredNonLow ?? acc.allowNonLow, 0)}"></div>
+    <div class="config-field"><label>强制非蓝海</label><select data-account-force-nonblue><option value="0" ${acc.forceNonBlue ? '' : 'selected'}>否</option><option value="1" ${acc.forceNonBlue ? 'selected' : ''}>是</option></select></div>
+    <div class="config-field"><label>强制非低价</label><select data-account-force-nonlow><option value="0" ${acc.forceNonLow ? '' : 'selected'}>否</option><option value="1" ${acc.forceNonLow ? 'selected' : ''}>是</option></select></div>
+    <button class="mini-btn config-remove" type="button" data-remove-account>删除</button>
+  </div>`;
+}
+function renderConfigPanel(){
+  const panel = $('#configPanel');
+  if (!panel) return;
+  syncCurrentConfig();
+  panel.innerHTML = `<div class="config-head">
+    <div><strong>配置中心</strong><span>可直接改风格线名称、每条风格线总选品数 / 蓝海数 / 低价数，也可改账号名称、所属风格线、账号坑位、非蓝海数、非低价数。保存后会按新规则刷新统计、推荐和导出。</span></div>
+    <div class="config-actions">
+      <button class="mini-btn" type="button" id="addStyleBtn">新增风格线</button>
+      <button class="mini-btn" type="button" id="addAccountBtn">新增账号</button>
+      <button class="mini-btn" type="button" id="saveConfigBtn">保存配置</button>
+      <button class="mini-btn" type="button" id="resetConfigBtn">恢复默认</button>
+    </div>
+  </div>
+  <div class="config-section">
+    <div class="config-section-title"><strong>风格线指标</strong><span>非蓝海 / 非低价会自动按总数扣减展示</span></div>
+    <div class="config-rows" id="styleConfigRows">${styleOrder.map(style => styleConfigRowHtml(style, styleTargets[style])).join('')}</div>
+  </div>
+  <div class="config-section">
+    <div class="config-section-title"><strong>账号坑位</strong><span>账号的非蓝海数、非低价数会作为自动推荐优先补齐规则</span></div>
+    <div class="config-rows" id="accountConfigRows">${accounts.map(accountConfigRowHtml).join('')}</div>
+  </div>`;
+  bindConfigPanelEvents();
+}
+function refreshAccountStyleOptions(){
+  const styleNames = $$('[data-config-style-row]').map(row => norm(row.querySelector('[data-style-name]')?.value)).filter(Boolean);
+  $$('[data-account-style]').forEach(select => {
+    const old = select.value;
+    select.innerHTML = styleNames.map(style => `<option value="${esc(style)}" ${style === old ? 'selected' : ''}>${esc(style)}</option>`).join('');
+    if (old && styleNames.includes(old)) select.value = old;
+  });
+}
+function updateConfigDerived(){
+  $$('[data-config-style-row]').forEach(row => {
+    const posts = numInput(row.querySelector('[data-style-posts]')?.value, 0);
+    const blue = Math.min(posts, numInput(row.querySelector('[data-style-blue]')?.value, 0));
+    const low = Math.min(posts, numInput(row.querySelector('[data-style-low]')?.value, 0));
+    const derived = row.querySelectorAll('.config-derived');
+    if (derived[0]) derived[0].textContent = `非蓝海 ${Math.max(0, posts - blue)}`;
+    if (derived[1]) derived[1].textContent = `非低价 ${Math.max(0, posts - low)}`;
+  });
+}
+function bindConfigPanelEvents(){
+  $('#addStyleBtn').onclick = () => {
+    const rows = $('#styleConfigRows');
+    rows.insertAdjacentHTML('beforeend', styleConfigRowHtml(`新风格线${rows.children.length + 1}`, {posts:0, blue:0, low:0}));
+    bindConfigPanelEvents(); refreshAccountStyleOptions(); updateConfigDerived();
+  };
+  $('#addAccountBtn').onclick = () => {
+    const rows = $('#accountConfigRows');
+    const style = norm($('[data-style-name]')?.value) || styleOrder[0] || '默认风格线';
+    rows.insertAdjacentHTML('beforeend', accountConfigRowHtml({name:`新账号${rows.children.length + 1}`, style, quota:1, allowNonLow:0, allowNonBlue:0, requiredNonLow:0, requiredNonBlue:0, keywords:[]}));
+    bindConfigPanelEvents();
+  };
+  $('#saveConfigBtn').onclick = saveConfigFromPanel;
+  $('#resetConfigBtn').onclick = resetDefaultConfig;
+  $$('[data-remove-style]').forEach(btn => btn.onclick = () => { btn.closest('[data-config-style-row]')?.remove(); refreshAccountStyleOptions(); updateConfigDerived(); });
+  $$('[data-remove-account]').forEach(btn => btn.onclick = () => btn.closest('[data-config-account-row]')?.remove());
+  $$('[data-style-name]').forEach(input => input.addEventListener('input', refreshAccountStyleOptions));
+  $$('[data-style-posts], [data-style-blue], [data-style-low]').forEach(input => input.addEventListener('input', updateConfigDerived));
+}
+function saveConfigFromPanel(){
+  const nextTargets = {};
+  $$('[data-config-style-row]').forEach((row, idx) => {
+    const name = norm(row.querySelector('[data-style-name]')?.value) || `风格线${idx + 1}`;
+    const posts = numInput(row.querySelector('[data-style-posts]')?.value, 0);
+    const blue = Math.min(posts, numInput(row.querySelector('[data-style-blue]')?.value, 0));
+    const low = Math.min(posts, numInput(row.querySelector('[data-style-low]')?.value, 0));
+    nextTargets[name] = {label:norm(row.querySelector('[data-style-label]')?.value) || name, posts, blue, low};
+  });
+  if (!Object.keys(nextTargets).length) {
+    toast('至少保留一条风格线');
+    return;
+  }
+  const styleNames = Object.keys(nextTargets);
+  const nextAccounts = [];
+  $$('[data-config-account-row]').forEach((row, idx) => {
+    const name = norm(row.querySelector('[data-account-name]')?.value) || `账号${idx + 1}`;
+    const style = norm(row.querySelector('[data-account-style]')?.value) || styleNames[0];
+    const quota = numInput(row.querySelector('[data-account-quota]')?.value, 0);
+    const nonBlue = Math.min(quota, numInput(row.querySelector('[data-account-nonblue]')?.value, 0));
+    const nonLow = Math.min(quota, numInput(row.querySelector('[data-account-nonlow]')?.value, 0));
+    nextAccounts.push({
+      style: nextTargets[style] ? style : styleNames[0], group: style, short: name.slice(0, 4), name, quota,
+      allowNonBlue: nonBlue, requiredNonBlue: nonBlue, allowNonLow: nonLow, requiredNonLow: nonLow,
+      forceNonBlue: row.querySelector('[data-account-force-nonblue]')?.value === '1',
+      forceNonLow: row.querySelector('[data-account-force-nonlow]')?.value === '1',
+      keywords: name.split(/[\s/（）：:、,，]+/).filter(Boolean)
+    });
+  });
+  if (!nextAccounts.length) {
+    toast('至少保留一个账号');
+    return;
+  }
+  styleTargets = nextTargets;
+  styleOrder = Object.keys(styleTargets);
+  accounts = nextAccounts;
+  selected.clear();
+  lastClearedSelected = null;
+  syncCurrentConfig();
+  if (rawRows.length) normalizeProducts();
+  renderConfigPanel();
+  renderAll();
+  toast('配置已保存，并已清空旧选品，避免账号改名导致统计错位');
+}
+function resetDefaultConfig(){
+  styleTargets = cloneStyleTargets(defaultStyleTargets);
+  styleOrder = Object.keys(styleTargets);
+  accounts = cloneAccounts(defaultAccounts);
+  selected.clear();
+  lastClearedSelected = null;
+  syncCurrentConfig();
+  if (rawRows.length) normalizeProducts();
+  renderConfigPanel();
+  renderAll();
+  toast('已恢复默认选品规则');
+}
+function truthBlue(v){
+  const s=norm(v).toLowerCase();
+  if (!s) return true; // 没说的默认蓝海/浅海
+  if (/非蓝海|not\s*blue|non[-\s]*blue/.test(s)) return false; // “非蓝海浅蓝”归入非蓝海专区
+  if (/浅海|浅蓝|蓝海|blue\s*ocean|yes|true|^y$|^1$|是/.test(s)) return true;
+  return true;
+}
+function blueCategory(v){
+  const s = norm(v);
+  if (!s) return '蓝海';
+  if (/非蓝海|not\s*blue|non[-\s]*blue/i.test(s)) return '非蓝海';
+  if (/浅海|浅蓝/i.test(s)) return /浅蓝/i.test(s) ? '浅蓝' : '浅海';
+  if (/蓝海|blue\s*ocean|yes|true|^y$|^1$|是/i.test(s)) return '蓝海';
+  return s;
+}
+function truthLow(v, blankIsLow=true){
+  const s=norm(v).toLowerCase();
+  if (!s) return blankIsLow;
+  if (/非低价|不是低价|not\s*low|non[-\s]*low/.test(s)) return false;
+  if (/近\s*(1|一)\s*天\s*低价|近\s*30\s*天\s*低价|低价|近期低价|最低价|low\s*price|yes|true|^y$|^1$|是/.test(s)) return true;
+  return blankIsLow;
+}
+function num(v){ const n = Number(String(v ?? '').replace(/[,%$¥,]/g,'')); return Number.isFinite(n) ? n : 0; }
+function pctNum(v){
+  const s = String(v ?? '').trim();
+  if (!s) return 0;
+  const n = num(s);
+  if (!Number.isFinite(n)) return 0;
+  return s.includes('%') || n > 1 ? n : n * 100;
+}
+function fmtMetric(v, suffix=''){
+  if (!v) return '';
+  const n = Math.round(v * 10) / 10;
+  return `${n}${suffix}`;
+}
+function pIndicator(explicitTag=''){
+  const tag = norm(explicitTag).toUpperCase();
+  if (/\bP0\b/.test(tag)) return {level:'P0', hits:['表格P0/P1标签=P0']};
+  if (/\bP1\b/.test(tag)) return {level:'P1', hits:['表格P0/P1标签=P1']};
+  return {level:'', hits:[]};
+}
+function detect(headers, names){
+  const lower = headers.map(h => String(h).toLowerCase());
+  for (const name of names) {
+    const i = lower.findIndex(h => h.includes(name.toLowerCase()));
+    if (i >= 0) return headers[i];
+  }
+  return '';
+}
+function fixWorksheetRef(ws){
+  if (!ws) return ws;
+  const refs = Object.keys(ws).filter(k => /^[A-Z]+\d+$/.test(k));
+  if (!refs.length) return ws;
+  const pos = refs.map(ref => XLSX.utils.decode_cell(ref));
+  const range = {
+    s: {c: Math.min(...pos.map(p => p.c)), r: Math.min(...pos.map(p => p.r))},
+    e: {c: Math.max(...pos.map(p => p.c)), r: Math.max(...pos.map(p => p.r))}
+  };
+  const calculatedRef = XLSX.utils.encode_range(range);
+  if (!ws['!ref'] || ws['!ref'] === 'A1') ws['!ref'] = calculatedRef;
+  ws.__calculatedRef = calculatedRef;
+  return ws;
+}
+function sheetToAoa(ws){
+  fixWorksheetRef(ws);
+  const originalRef = ws['!ref'];
+  const refs = [originalRef, ws.__calculatedRef].filter(Boolean);
+  for (const ref of refs) {
+    ws['!ref'] = ref;
+    const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false, blankrows:false});
+    if (aoa.some(row => row.some(v => norm(v)))) { ws['!ref'] = originalRef || ref; return aoa; }
+  }
+  ws['!ref'] = originalRef;
+  const cellRefs = Object.keys(ws).filter(k => /^[A-Z]+\d+$/.test(k));
+  if (!cellRefs.length) return [];
+  const cells = cellRefs.map(ref => ({ref, pos:XLSX.utils.decode_cell(ref)}));
+  const maxR = Math.max(...cells.map(x => x.pos.r));
+  const maxC = Math.max(...cells.map(x => x.pos.c));
+  const aoa = Array.from({length:maxR + 1}, () => Array(maxC + 1).fill(''));
+  cells.forEach(({ref, pos}) => { aoa[pos.r][pos.c] = ws[ref]?.w ?? ws[ref]?.v ?? ''; });
+  return aoa.filter(row => row.some(v => norm(v)));
+}
+function uniqueHeaders(headers){
+  const seen = {};
+  return headers.map((h, i) => {
+    const base = norm(h) || `未命名列${i + 1}`;
+    seen[base] = (seen[base] || 0) + 1;
+    return seen[base] === 1 ? base : `${base}_${seen[base]}`;
+  });
+}
+function rowsFromWorksheet(ws){
+  const aoa = sheetToAoa(ws);
+  if (!aoa.length) return [];
+  const headerIndex = aoa.findIndex(row => {
+    const text = row.map(norm).join('\t');
+    return /PID/.test(text) && /一级类目|二级类目|是否蓝海|风格线/.test(text);
+  });
+  const start = headerIndex >= 0 ? headerIndex : 0;
+  const headers = uniqueHeaders(aoa[start]);
+  return aoa.slice(start + 1).filter(row => row.some(v => norm(v))).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] ?? ''])));
+}
+function extractImageUrl(v){
+  const s = norm(v);
+  if (!s) return '';
+  if (/^(blob:|data:image\/|https?:\/\/|\/\/)/i.test(s)) return s.startsWith('//') ? `${location.protocol}${s}` : s;
+  const m = s.match(/https?:\/\/[^\s"'<>]+/i);
+  return m ? m[0] : '';
+}
+function clearEmbeddedImageUrls(){
+  embeddedImageUrls.forEach(url => URL.revokeObjectURL(url));
+  embeddedImageUrls = [];
+  embeddedImagesByRow = {};
+}
+function resolveXlsxPath(basePath, target){
+  if (!target) return '';
+  if (target.startsWith('/')) return target.replace(/^\/+/, '');
+  const base = basePath.split('/').slice(0, -1);
+  target.split('/').forEach(part => {
+    if (!part || part === '.') return;
+    if (part === '..') base.pop();
+    else base.push(part);
+  });
+  return base.join('/');
+}
+function relationshipsById(xmlText){
+  const rels = {};
+  if (!xmlText) return rels;
+  const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
+  Array.from(xml.getElementsByTagName('Relationship')).forEach(rel => {
+    rels[rel.getAttribute('Id')] = rel.getAttribute('Target') || '';
+  });
+  return rels;
+}
+function mimeFromPath(path){
+  const ext = path.split('.').pop().toLowerCase();
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/png';
+}
+async function extractXlsxEmbeddedImages(data, wb){
+  if (!window.JSZip) return {};
+  const zip = await JSZip.loadAsync(data);
+  const workbookXml = await zip.file('xl/workbook.xml')?.async('text');
+  const workbookRelsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('text');
+  let sheetPath = 'xl/worksheets/sheet1.xml';
+  if (workbookXml && workbookRelsXml) {
+    const workbook = new DOMParser().parseFromString(workbookXml, 'application/xml');
+    const rels = relationshipsById(workbookRelsXml);
+    const sheetName = wb.SheetNames[0];
+    const sheets = Array.from(workbook.getElementsByTagNameNS('*', 'sheet'));
+    const sheet = sheets.find(x => x.getAttribute('name') === sheetName) || sheets[0];
+    const rid = sheet?.getAttribute('r:id') || sheet?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    if (rid && rels[rid]) sheetPath = resolveXlsxPath('xl/workbook.xml', rels[rid]);
+  }
+  const sheetRelsPath = sheetPath.replace('/worksheets/', '/worksheets/_rels/') + '.rels';
+  const sheetRelsXml = await zip.file(sheetRelsPath)?.async('text');
+  const sheetRels = relationshipsById(sheetRelsXml);
+  const sheetXml = await zip.file(sheetPath)?.async('text');
+  if (!sheetXml) return {};
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml');
+  const drawing = Array.from(sheetDoc.getElementsByTagNameNS('*', 'drawing'))[0];
+  const drawingRid = drawing?.getAttribute('r:id') || drawing?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+  if (!drawingRid || !sheetRels[drawingRid]) return {};
+  const drawingPath = resolveXlsxPath(sheetPath, sheetRels[drawingRid]);
+  const drawingXml = await zip.file(drawingPath)?.async('text');
+  if (!drawingXml) return {};
+  const drawingRelsPath = drawingPath.replace('/drawings/', '/drawings/_rels/') + '.rels';
+  const drawingRelsXml = await zip.file(drawingRelsPath)?.async('text');
+  const drawingRels = relationshipsById(drawingRelsXml);
+  const drawingDoc = new DOMParser().parseFromString(drawingXml, 'application/xml');
+  const rowToImage = {};
+  const anchors = [...Array.from(drawingDoc.getElementsByTagNameNS('*', 'twoCellAnchor')), ...Array.from(drawingDoc.getElementsByTagNameNS('*', 'oneCellAnchor'))];
+  for (const anchor of anchors) {
+    const from = Array.from(anchor.getElementsByTagNameNS('*', 'from'))[0];
+    const rowText = Array.from(from?.getElementsByTagNameNS('*', 'row') || [])[0]?.textContent;
+    const rowZeroBased = Number(rowText);
+    const blip = Array.from(anchor.getElementsByTagNameNS('*', 'blip'))[0];
+    const rid = blip?.getAttribute('r:embed') || blip?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed');
+    if (!Number.isFinite(rowZeroBased) || !rid || !drawingRels[rid]) continue;
+    const mediaPath = resolveXlsxPath(drawingPath, drawingRels[rid]);
+    const media = zip.file(mediaPath);
+    if (!media) continue;
+    const blob = await media.async('blob');
+    const url = URL.createObjectURL(new Blob([blob], {type: mimeFromPath(mediaPath)}));
+    embeddedImageUrls.push(url);
+    rowToImage[rowZeroBased + 1] = url;
+  }
+  return rowToImage;
+}
+function autoMapping(headers){
+  mapping = {
+    pid: detect(headers, ['pid','product id','商品id','商品ID','spu','id']),
+    title: detect(headers, ['商品名称','标题','title','name','品名','叶子类目','spu_code']),
+    image: detect(headers, ['图片预览','图片','image','img','主图','封面','url']),
+    gmv: detect(headers, ['gmv','支付金额','成交金额','销售额','订单量']),
+    growth: detect(headers, ['近1天增长率','增速','growth','增长','wow','环比']),
+    style: detect(headers, ['风格线','风格','style','类目']),
+    account: detect(headers, ['账号','达人','account','人设']),
+    blue: detect(headers, ['是否蓝海类目','蓝海','浅海','浅蓝','blue']),
+    low: detect(headers, ['是否最低价','近1天低价','近一天低价','近30天低价','低价','近期低价','最低价','low price','price']),
+    pTag: detect(headers, ['P0/P1标签','P0P1标签','P0','P1','品指标']),
+    algoScore: detect(headers, ['算法选品分','video_score_v3','算法分','score']),
+    videoShare: detect(headers, ['短视频GMV占比','短视频占比','短视频渗透','短视频','video share','video gmv']),
+    lifecycle: detect(headers, ['商品生命周期标签','生命周期','爆品','大爆','商品标签','标签']),
+    market: detect(headers, ['货盘','市场','站点','国家','market','region','country','类型']),
+    sizeType: detect(headers, ['尺码','尺码类型','大码/标码','大码','标码','size','plus','standard','类型','货盘']),
+    productType: detect(headers, ['一级类目','二级类目','三级类目','叶子类目','鞋包','箱包','鞋靴','类目','category','类型'])
+  };
+}
+function detectMarket(v, hay){
+  const s = `${norm(v)} ${hay || ''}`;
+  if (/(^|[^a-z])de([^a-z]|$)|德国|德区|德站/i.test(s)) return 'DE';
+  if (/(^|[^a-z])us(a)?([^a-z]|$)|美国|美区|美站/i.test(s)) return 'US';
+  return '';
+}
+function detectSizeType(v, hay){
+  const s = `${norm(v)} ${hay || ''}`.toLowerCase();
+  if (/大码|大尺码|加大码|加码|胖mm|plus\s*size|plus-size|plus_size|curve|curvy|丰满|胖女|plussize/.test(s)) return '大码';
+  if (/标码|标准码|常规码|普通码|regular|standard|straight\s*size|straight-size/.test(s)) return '标码';
+  return '';
+}
+function detectProductType(v, title, hay){
+  const s = `${norm(v)} ${title || ''} ${hay || ''}`.toLowerCase();
+  if (/鞋包|箱包|包袋|女包|手袋|背包|托特|tote|bag|purse|鞋|靴|凉鞋|拖鞋|shoe|boot|sandal|heel|sneaker/.test(s)) return '鞋包';
+  return '女装';
+}
+function buildMapping(){
+  const headers = Object.keys(rawRows[0] || {});
+  const box = $('#mappingBox');
+  box.innerHTML = wantedFields.map(([key,label]) => `
+    <div class="field"><label>${label}</label><select data-map="${key}">
+      <option value="">不使用</option>${headers.map(h => `<option value="${h}" ${mapping[key]===h?'selected':''}>${h}</option>`).join('')}
+    </select></div>`).join('');
+  box.querySelectorAll('select').forEach(sel => sel.addEventListener('change', e => { mapping[e.target.dataset.map] = e.target.value; normalizeProducts(); renderAll(); }));
+}
+function getAccountValue(r, acc){
+  const candidates = [acc.style, acc.group, '跨风格引流型（不含混剪）', '跨风格引流型', 'Modest Daily', '甜辣风', '成熟优雅风'];
+  for (const c of candidates) if (r[c]) return norm(r[c]);
+  return '';
+}
+function normalizeProducts(){
+  products = rawRows.map((r, idx) => {
+    const title = norm(r[mapping.title]) || norm(r['叶子类目']) || norm(r['三级类目']) || norm(r['二级类目']) || norm(r['spu_code']) || `未命名商品 ${idx+1}`;
+    const hay = Object.values(r).join(' ').toLowerCase();
+    const gmv = num(r[mapping.gmv]);
+    const growth = pctNum(r[mapping.growth]);
+    const algoRaw = mapping.algoScore ? norm(r[mapping.algoScore]) : '';
+    const hasAlgoScore = algoRaw !== '';
+    const algoScore = num(algoRaw);
+    const videoShare = pctNum(r[mapping.videoShare]);
+    const blueVal = mapping.blue ? r[mapping.blue] : '';
+    const lowVal = mapping.low ? r[mapping.low] : '';
+    const lowBlankIsLow = !(mapping.low && /是否.*最低价|是否.*低价|近期.*最低价|近\s*(1|一)\s*天.*低价|近\s*30\s*天.*低价/.test(mapping.low));
+    const lifecycle = mapping.lifecycle ? norm(r[mapping.lifecycle]) : '';
+    const pTag = mapping.pTag ? norm(r[mapping.pTag]) : '';
+    const pInfo = pIndicator(pTag);
+    const sizeType = detectSizeType(mapping.sizeType ? r[mapping.sizeType] : '', hay);
+    const market = detectMarket(mapping.market ? r[mapping.market] : '', hay);
+    const productType = detectProductType(mapping.productType ? r[mapping.productType] : '', title, hay);
+    return {
+      uid: `${norm(r[mapping.pid]) || 'row'}-${idx}`,
+      rowIndex: idx + 2,
+      pid: norm(r[mapping.pid]) || `ROW-${idx+1}`,
+      title,
+      image: extractImageUrl(r[mapping.image]) || embeddedImagesByRow[idx + 2] || embeddedImagesByRow[idx + 1] || '',
+      imageIsEmbedded: !!(!extractImageUrl(r[mapping.image]) && (embeddedImagesByRow[idx + 2] || embeddedImagesByRow[idx + 1])),
+      gmv,
+      growth,
+      algoScore,
+      hasAlgoScore,
+      videoShare,
+      lifecycle,
+      pTag,
+      pLevel: pInfo.level,
+      pHits: pInfo.hits,
+      market,
+      sizeType,
+      productType,
+      style: norm(r[mapping.style]),
+      account: norm(r[mapping.account]),
+      accountValues: Object.fromEntries(accounts.map(acc => [acc.name, getAccountValue(r, acc)])),
+      blueCategory: mapping.blue ? blueCategory(blueVal) : '蓝海',
+      blue: mapping.blue ? truthBlue(blueVal) : (/非蓝海|not\s*blue|non[-\s]*blue/i.test(hay) ? false : true),
+      low: mapping.low ? truthLow(lowVal, lowBlankIsLow) : (/非低价|不是低价|not\s*low|non[-\s]*low/i.test(hay) ? false : true),
+      hay,
+      raw: r,
+      recommendedFor: []
+    };
+  });
+  rankProducts();
+}
+function scoreFor(p, acc){
+  let s = 0;
+  const hay = `${p.title} ${p.style} ${p.account} ${p.accountValues?.[acc.name] || ''} ${p.hay}`.toLowerCase();
+  const accountHit = norm(p.accountValues?.[acc.name]);
+  if (accountHit) s += accountHit === acc.name ? 120 : 70;
+  if (isNativeStyleForAccount(p, acc)) s += 16;
+  if (isCrossStyleFit(p, acc)) s += 14;
+  if (p.account && acc.name.includes(p.account)) s += 18;
+  acc.keywords.forEach(k => { if (hay.includes(k.toLowerCase())) s += 9; });
+  if (p.blue) s += 24;
+  if (p.low) s += 26;
+  if (p.growth >= 30) s += 14;
+  if (p.gmv) s += Math.min(16, Math.log10(p.gmv + 1) * 3);
+  if (p.algoScore) s += Math.min(10, p.algoScore / 10);
+  if (p.videoShare) s += Math.min(8, p.videoShare / 10);
+  if (p.pLevel === 'P0') s += 18;
+  else if (p.pLevel === 'P1') s += 10;
+  return Math.round(s);
+}
+function rankProducts(){
+  products.forEach(p => {
+    p.recommendedFor = accounts.map(acc => ({acc, score: scoreFor(p, acc)})).filter(x => x.score > 18).sort((a,b)=>b.score-a.score).slice(0,3);
+  });
+}
+function effectiveBlue(product, acc){ return acc?.forceNonBlue ? false : product.blue; }
+function effectiveLow(product, acc){ return acc?.forceNonLow ? false : product.low; }
+function isShallowBlue(product){ return /浅海|浅蓝/i.test(product.blueCategory || ''); }
+function isBlueZone(product, acc){ return acc?.forceNonBlue ? false : (effectiveBlue(product, acc) || isShallowBlue(product)); }
+function isNonBlueZone(product, acc){ return acc?.forceNonBlue ? true : !isBlueZone(product, acc); }
+function ruleText(acc){
+  const bits = [`${acc.quota} 条`];
+  if (acc.requiredNonBlue) bits.push(`${acc.quota}条中有 ${acc.requiredNonBlue} 条非蓝海`);
+  if (acc.requiredNonLow) bits.push(`${acc.quota}条中有 ${acc.requiredNonLow} 条非低价`);
+  if (!acc.requiredNonBlue && !acc.requiredNonLow) bits.push('没说的默认蓝海且低价');
+  return `${acc.name}：${bits.join('，')}；蓝海专区=蓝海/浅海；非蓝海浅蓝归入非蓝海专区；蓝海和低价分开计数。`;
+}
+function pickBest(ranked, chosen, predicate, label){
+  const usedLocal = new Set(chosen.map(x => x.p.uid));
+  const item = ranked.find(x => !usedLocal.has(x.p.uid) && predicate(x.p));
+  if (!item) return false;
+  chosen.push({p:item.p, score:item.score, ruleLabel:label});
+  return true;
+}
+function autoRecommend(){
+  selected.clear();
+  lastClearedSelected = null;
+  const used = new Set();
+  const tryAutoPick = (acc, item, ruleLabel='') => {
+    if (!item || used.has(item.p.uid) || selected.has(`${acc.name}::${item.p.uid}`)) return false;
+    if (!productAvailableForAccount(item.p, acc)) return false;
+    if (canSelect(acc, item.p)) return false;
+    selected.set(`${acc.name}::${item.p.uid}`, {account: acc.name, product: item.p, score: item.score, ruleLabel});
+    used.add(item.p.uid);
+    return true;
+  };
+  accounts.forEach(acc => {
+    const ranked = products.map(p => ({p, score: scoreFor(p, acc)})).filter(x=>!used.has(x.p.uid) && productAvailableForAccount(x.p, acc)).sort((a,b)=>b.score-a.score || b.p.growth-a.p.growth || b.p.gmv-a.p.gmv);
+    for (let i=0; i<(acc.requiredNonBlue || 0); i++) {
+      tryAutoPick(acc, ranked.find(x => !used.has(x.p.uid) && isNonBlueZone(x.p, acc)), `${acc.name}规则：非蓝海`);
+    }
+    for (let i=0; i<(acc.requiredNonLow || 0); i++) {
+      tryAutoPick(acc, ranked.find(x => !used.has(x.p.uid) && !effectiveLow(x.p, acc)), `${acc.name}规则：非低价`);
+    }
+    for (const item of ranked) {
+      if (accountSelected(acc).length >= acc.quota) break;
+      if (used.has(item.p.uid)) continue;
+      const picks = accountSelected(acc);
+      const nextNonLow = picks.filter(x=>!effectiveLow(x.product, acc)).length + (effectiveLow(item.p, acc) ? 0 : 1);
+      const nextNonBlue = picks.filter(x=>isNonBlueZone(x.product, acc)).length + (isBlueZone(item.p, acc) ? 0 : 1);
+      if (nextNonLow > acc.allowNonLow || nextNonBlue > acc.allowNonBlue) continue;
+      tryAutoPick(acc, item);
+    }
+    for (const item of ranked) {
+      if (accountSelected(acc).length >= acc.quota) break;
+      if (used.has(item.p.uid)) continue;
+      tryAutoPick(acc, item, '补位候选');
+    }
+  });
+  renderAll(); toast(`已自动推荐 ${selected.size}/${getTotalQuota()} 个坑位；若未填满，说明已受账号或风格线指标限制`);
+}
+function clearSelectedProducts(){
+  if (!selected.size) { toast('当前没有已选商品'); return; }
+  const n = selected.size;
+  lastClearedSelected = new Map(selected);
+  selected.clear();
+  renderAll();
+  toast(`已清空 ${n} 个已选商品，可点“撤回清空”找回`);
+}
+function undoClearSelectedProducts(){
+  if (!lastClearedSelected || !lastClearedSelected.size) {
+    toast('没有可撤回的清空记录');
+    return;
+  }
+  selected = new Map(lastClearedSelected);
+  const n = selected.size;
+  lastClearedSelected = null;
+  renderAll();
+  toast(`已找回 ${n} 个刚才清空的选品`);
+}
+function clearCurrentAccountProducts(){
+  const picks = accountSelected(currentAccount);
+  if (!picks.length) { toast(`「${currentAccount.name}」当前没有已选商品`); return; }
+  const n = picks.length;
+  Array.from(selected.keys()).forEach(key => {
+    if (key.startsWith(`${currentAccount.name}::`)) selected.delete(key);
+  });
+  renderAll();
+  toast(`已清空「${currentAccount.name}」的 ${n} 个已选商品`);
+}
+function accountForName(name){ return accounts.find(a => a.name === name); }
+function isNativeStyleForAccount(p, acc){
+  if (!p.style) return true;
+  return p.style.includes(acc.style) || acc.style.includes(p.style) || (acc.style.includes('跨风格') && p.style.includes('跨风格'));
+}
+function isCrossStyleFit(p, acc){
+  if (!p.style || isNativeStyleForAccount(p, acc)) return false;
+  const hay = `${p.title} ${p.style} ${p.account} ${p.hay}`.toLowerCase();
+  const hits = (acc.keywords || []).filter(k => hay.includes(k.toLowerCase()));
+  return hits.length > 0;
+}
+function crossStyleFitLabel(p, acc){
+  if (!isCrossStyleFit(p, acc)) return '';
+  const hay = `${p.title} ${p.style} ${p.account} ${p.hay}`.toLowerCase();
+  const hits = (acc.keywords || []).filter(k => hay.includes(k.toLowerCase())).slice(0,2);
+  return hits.length ? `跨风格匹配：${hits.join('、')}` : '跨风格匹配';
+}
+function productAvailableForAccount(p, acc){
+  // 表格里的风格线 / 账号列只作为推荐排序参考，不再限制可见范围；所有账号共用同一个品池。
+  return true;
+}
+function searchableValue(v){
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    if ('text' in v) return norm(v.text);
+    if ('v' in v) return norm(v.v);
+    if ('w' in v) return norm(v.w);
+    return '';
+  }
+  return norm(v);
+}
+function compactSearchText(v){
+  return searchableValue(v).toLowerCase().replace(/[\s\-_#：:，,。./\\]+/g, '');
+}
+function searchTextForProduct(p){
+  return [
+    p.pid, p.title, p.style, p.account, p.blueCategory, p.market, p.sizeType, p.productType,
+    p.pLevel, p.pTag, p.lifecycle, p.hay,
+    Object.values(p.accountValues || {}).join(' '),
+    Object.values(p.raw || {}).map(searchableValue).join(' ')
+  ].map(searchableValue).join(' ').toLowerCase();
+}
+function passSearch(p){
+  const q = norm(searchQuery).toLowerCase();
+  if (!q) return true;
+  const terms = q.split(/[\s，,]+/).map(t => t.trim()).filter(Boolean);
+  if (!terms.length) return true;
+  const hay = searchTextForProduct(p);
+  const compactHay = compactSearchText(hay);
+  const pidText = compactSearchText(p.pid);
+  return terms.every(t => {
+    const compactTerm = compactSearchText(t);
+    if (!compactTerm) return true;
+    return hay.includes(t) || compactHay.includes(compactTerm) || pidText.includes(compactTerm);
+  });
+}
+function passExtraFilters(p){
+  if (!passSearch(p)) return false;
+  if (marketFilterValue !== 'all' && p.market !== marketFilterValue) return false;
+  if (sizeFilterValue !== 'all' && p.sizeType !== sizeFilterValue) return false;
+  if (productTypeFilterValue !== 'all' && p.productType !== productTypeFilterValue) return false;
+  return true;
+}
+function filterLabel(f){
+  return ({blue:'蓝海', nonBlue:'非蓝海', low:'低价', nonLow:'非低价', p0:'P0', p1:'P1'})[f] || f;
+}
+function productMatchesActiveFilter(p, f){
+  if (f === 'blue') return isBlueZone(p, currentAccount);
+  if (f === 'nonBlue') return isNonBlueZone(p, currentAccount);
+  if (f === 'low') return effectiveLow(p, currentAccount);
+  if (f === 'nonLow') return !effectiveLow(p, currentAccount);
+  if (f === 'p0') return p.pLevel === 'P0';
+  if (f === 'p1') return p.pLevel === 'P1';
+  return true;
+}
+function activeFilterText(){
+  const parts = Array.from(activeFilters).map(filterLabel);
+  if (norm(searchQuery)) parts.push(`搜索「${norm(searchQuery)}」`);
+  if (marketFilterValue !== 'all') parts.push(`${marketFilterValue}货盘`);
+  if (sizeFilterValue !== 'all') parts.push(sizeFilterValue);
+  if (productTypeFilterValue !== 'all') parts.push(productTypeFilterValue);
+  return parts.length ? parts.join(' + ') : '未限定分区';
+}
+function emptyReason(baseList, finalList){
+  if (!products.length) return '还没有品池数据。';
+  if (!baseList.length) return '当前品池没有可用商品；请检查上传文件是否解析成功。';
+  const reasons = [];
+  if (norm(searchQuery)) reasons.push(`搜索「${norm(searchQuery)}」 ${baseList.filter(x => passSearch(x.p)).length} 个`);
+  if (marketFilterValue !== 'all') reasons.push(`${marketFilterValue}货盘 ${baseList.filter(x => x.p.market === marketFilterValue).length} 个`);
+  if (sizeFilterValue !== 'all') reasons.push(`${sizeFilterValue} ${baseList.filter(x => x.p.sizeType === sizeFilterValue).length} 个`);
+  if (productTypeFilterValue !== 'all') reasons.push(`${productTypeFilterValue} ${baseList.filter(x => x.p.productType === productTypeFilterValue).length} 个`);
+  activeFilters.forEach(f => reasons.push(`${filterLabel(f)} ${baseList.filter(x => productMatchesActiveFilter(x.p, f)).length} 个`));
+  const tips = [`当前组合筛选：${activeFilterText()}`];
+  if (reasons.length) tips.push(`当前账号可用池内分项数量：${reasons.join('，')}`);
+  if (norm(searchQuery)) tips.push('可以清空搜索，或减少关键词后再试。');
+  else tips.push('如果想单独看“大码”或“鞋包”，请先点“清空筛选”，再选择对应下拉；风格线只作为参考，不会限制当前账号可见商品。');
+  return tips.join('；');
+}
+function setFilterCombo(filters){
+  activeFilters = new Set(filters);
+  syncFilterPills();
+}
+function toggleFilter(f){
+  [['blue','nonBlue'], ['low','nonLow'], ['p0','p1']].forEach(group => {
+    if (group.includes(f)) group.forEach(x => { if (x !== f) activeFilters.delete(x); });
+  });
+  if (activeFilters.has(f)) activeFilters.delete(f);
+  else activeFilters.add(f);
+  syncFilterPills();
+}
+function syncFilterPills(){
+  $$('.pill[data-filter]').forEach(p => {
+    const f = p.dataset.filter;
+    p.classList.toggle('active', activeFilters.has(f));
+  });
+  const labels = Array.from(activeFilters).map(filterLabel);
+  const hint = labels.length ? `当前组合筛选：${labels.join(' + ')}；同组互斥项会自动替换。` : '当前未限定分区；会展示该账号可选的全部商品。';
+  const el = $('#filterHint');
+  if (el) el.textContent = hint;
+}
+function accountSelected(acc){ return Array.from(selected.values()).filter(x => x.account === acc.name); }
+function styleSelected(style){ return Array.from(selected.values()).filter(x => accountForName(x.account)?.style === style); }
+function styleMetrics(style){
+  const vals = styleSelected(style);
+  return {
+    total: vals.length,
+    blue: vals.filter(x => isBlueZone(x.product, accountForName(x.account))).length,
+    low: vals.filter(x => effectiveLow(x.product, accountForName(x.account))).length
+  };
+}
+function styleComplete(style){
+  const target = styleTargets[style];
+  const m = styleMetrics(style);
+  return !!target && m.total === target.posts && m.blue === target.blue && m.low === target.low;
+}
+function renderStyles(){
+  syncCurrentConfig();
+  $('#styleList').innerHTML = styleOrder.map(style => {
+    const target = styleTargets[style];
+    const m = styleMetrics(style);
+    const done = styleComplete(style);
+    const pct = target.posts ? Math.min(100, Math.round(m.total / target.posts * 100)) : 0;
+    return `<div class="style-card ${style===currentStyle?'active':''} ${done?'done':''}" data-style="${style}">
+      <div class="style-title"><span>${target.label}</span><span class="tag">${m.total}/${target.posts}</span></div>
+      <div class="progress"><div class="bar" style="width:${pct}%;background:${done?'var(--green)':'var(--burnt)'}"></div></div>
+      <div class="style-metrics"><span>发稿 ${m.total}/${target.posts}</span><span>蓝海 ${m.blue}/${target.blue}</span><span>低价 ${m.low}/${target.low}</span></div>
+    </div>`;
+  }).join('');
+  $$('.style-card').forEach(el => el.onclick = () => {
+    currentStyle = el.dataset.style;
+    currentAccount = accounts.find(a => a.style === currentStyle) || currentAccount;
+    renderAll();
+  });
+}
+function renderAccounts(){
+  syncCurrentConfig();
+  const visibleAccounts = accounts.filter(acc => acc.style === currentStyle);
+  if (!visibleAccounts.some(acc => acc.name === currentAccount.name)) currentAccount = visibleAccounts[0] || accounts[0];
+  $('#accountList').innerHTML = visibleAccounts.map(acc => {
+    const picks = accountSelected(acc); const blue = picks.filter(x=>isBlueZone(x.product, acc)).length; const low = picks.filter(x=>effectiveLow(x.product, acc)).length;
+    const pct = Math.min(100, Math.round(picks.length / acc.quota * 100));
+    const ok = picks.length === acc.quota;
+    return `<div class="account ${acc.name===currentAccount.name?'active':''}" data-account="${acc.name}">
+      <div class="account-top"><div><div class="account-name">${acc.name}</div><div class="small">${acc.group} · ${acc.short}</div></div><span class="tag">${picks.length}/${acc.quota}</span></div>
+      <div class="progress"><div class="bar" style="width:${pct}%;background:${ok?'var(--green)':'var(--burnt)'}"></div></div>
+      <div class="small">蓝海 ${blue} 个 · 低价 ${low} 个 · 独立计数 · ${ok?'已满':'待补齐'}</div>
+    </div>`;
+  }).join('');
+  $$('.account').forEach(el => el.onclick = () => { currentAccount = accountForName(el.dataset.account); currentStyle = currentAccount.style; renderAll(); });
+}
+function reason(p, acc, score){
+  const bits = [];
+  const crossFit = crossStyleFitLabel(p, acc);
+  if (crossFit) bits.push(crossFit);
+  if (isBlueZone(p, acc)) bits.push('蓝海');
+  else bits.push(acc?.forceNonBlue ? '按账号规则计非蓝海' : '非蓝海');
+  if (effectiveLow(p, acc)) bits.push('近期低价');
+  else bits.push(acc?.forceNonLow ? '按账号规则计非低价' : '非低价');
+  if (p.growth >= 30) bits.push(`增速 ${p.growth}%`);
+  if (p.gmv) bits.push(`GMV ${p.gmv}`);
+  if (p.algoScore) bits.push(`算法分 ${fmtMetric(p.algoScore)}`);
+  if (p.videoShare) bits.push(`短视频占比 ${fmtMetric(p.videoShare, '%')}`);
+  if (p.pLevel) bits.push(`${p.pLevel}：${(p.pHits || []).join('、')}`);
+  const hit = acc.keywords.find(k => (`${p.title} ${p.hay}`).toLowerCase().includes(k.toLowerCase()));
+  if (hit) bits.push(`命中「${hit}」`);
+  return bits.length ? bits.join(' / ') : `综合分 ${score}，可作为补位候选`;
+}
+function isChecked(acc, p){ return selected.has(`${acc.name}::${p.uid}`); }
+function selectedByAccounts(p){
+  return Array.from(selected.values()).filter(x => x.product.uid === p.uid).map(x => x.account);
+}
+function canSelect(acc, p){
+  const accountCount = accountSelected(acc).length;
+  if (accountCount >= acc.quota) return `「${acc.name}」最多只能选 ${acc.quota} 条，不能再勾选。`;
+  const target = styleTargets[acc.style];
+  if (!target) return '';
+  const m = styleMetrics(acc.style);
+  const nextTotal = m.total + 1;
+  const nextBlue = m.blue + (isBlueZone(p, acc) ? 1 : 0);
+  const nextLow = m.low + (effectiveLow(p, acc) ? 1 : 0);
+  if (nextTotal > target.posts) return `「${target.label}」发稿不能超过 ${target.posts} 条。`;
+  if (nextBlue > target.blue) return `「${target.label}」蓝海品已满：目标 ${target.blue}/${target.posts}，当前已选 ${m.blue} 个蓝海。请切到“非蓝海专区”补。`;
+  if (nextLow > target.low) return `「${target.label}」低价品已满：目标 ${target.low}/${target.posts}，当前已选 ${m.low} 个低价。请切到“非低价专区”补。`;
+  return '';
+}
+function togglePick(acc, p){
+  const key = `${acc.name}::${p.uid}`;
+  if (selected.has(key)) selected.delete(key);
+  else {
+    const message = canSelect(acc, p);
+    if (message) { alert(message); renderProducts(); return; }
+    selected.set(key, {account: acc.name, product: p, score: scoreFor(p, acc)});
+  }
+  renderAll();
+}
+function renderProducts(){
+  syncCurrentConfig();
+  $('#currentTitle').textContent = `${currentAccount.name} · 需要 ${currentAccount.quota} 个品`;
+  $('#currentHint').textContent = ruleText(currentAccount);
+  syncFilterPills();
+  if (!products.length) { $('#productGrid').innerHTML = `<div class="empty">还没有品池数据。先上传今天的非红框品池表格，或点“加载示例”体验流程。</div>`; return; }
+  const baseList = products.map(p => ({p, score: scoreFor(p, currentAccount)})).sort((a,b)=>a.p.rowIndex-b.p.rowIndex);
+  let list = baseList.filter(x => passExtraFilters(x.p));
+  list = list.filter(x => Array.from(activeFilters).every(f => productMatchesActiveFilter(x.p, f)));
+  const searchText = norm(searchQuery);
+  $('#searchResultText').textContent = searchText ? `搜索「${searchText}」命中 ${list.length} 个；当前组合：${activeFilterText()}` : `当前显示 ${list.length} 个候选；搜索会和筛选叠加，多个关键词用空格分隔。`;
+  $('#productGrid').innerHTML = list.map(({p, score}) => {
+    const checked = isChecked(currentAccount, p);
+    const pickedAccounts = selectedByAccounts(p);
+    const pickedByOthers = pickedAccounts.filter(name => name !== currentAccount.name);
+    const pickedNote = pickedAccounts.length ? `<div class="picked-note">${checked ? '当前账号已选' : ''}${checked && pickedByOthers.length ? '；' : ''}${pickedByOthers.length ? `已被 ${pickedByOthers.join('、')} 选过` : ''}</div>` : '';
+    return `<article class="product ${checked?'checked':''} ${pickedByOthers.length?'picked-elsewhere':''}" data-card-pick="${p.uid}" role="button" tabindex="0" aria-pressed="${checked ? 'true' : 'false'}">
+      <div class="imgbox">${p.image ? `<img src="${p.image}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'noimg',textContent:'图片加载失败'}))">` : `<div class="noimg">无图片URL</div>`}</div>
+      <div class="product-body">
+        <div class="product-title">${p.title}</div>
+        ${pickedNote}
+        <div class="meta">
+          <span class="chip">PID ${p.pid}</span>
+          ${p.market ? `<span class="chip">${p.market}货盘</span>` : ''}
+          ${p.sizeType ? `<span class="chip">${p.sizeType}</span>` : ''}
+          ${p.productType ? `<span class="chip">${p.productType}</span>` : ''}
+          ${crossStyleFitLabel(p, currentAccount) ? `<span class="chip good">跨风格可选</span>` : ''}
+          ${p.blueCategory ? `<span class="chip">${p.blueCategory}</span>` : ''}
+          <span class="chip ${isBlueZone(p, currentAccount)?'good':'bad'}">${isBlueZone(p, currentAccount)?'计入蓝海':'非蓝海专区'}</span>
+          <span class="chip ${effectiveLow(p, currentAccount)?'good':'bad'}">${effectiveLow(p, currentAccount)?'计入低价':'非低价专区'}</span>
+          ${p.growth ? `<span class="chip ${p.growth>=30?'good':''}">增速 ${p.growth}%</span>` : ''}
+          ${p.algoScore ? `<span class="chip">算法分 ${fmtMetric(p.algoScore)}</span>` : ''}
+          ${p.videoShare ? `<span class="chip">短视频 ${fmtMetric(p.videoShare, '%')}</span>` : ''}
+          ${p.pLevel ? `<span class="chip ${p.pLevel==='P0'?'good':''}">${p.pLevel}</span>` : ''}
+        </div>
+        <div class="reason">${reason(p, currentAccount, score)}</div>
+        <div class="checkline"><span class="pickhint">${checked ? '点击取消选择' : '点击卡片选品'}</span><span class="score">Score ${score}</span></div>
+      </div>
+    </article>`;
+  }).join('') || `<div class="empty">当前筛选下没有商品。${emptyReason(baseList, list)}</div>`;
+  $$('[data-card-pick]').forEach(card => {
+    const pick = () => {
+      const p = products.find(x => x.uid === card.dataset.cardPick);
+      if (p) togglePick(currentAccount, p);
+    };
+    card.onclick = pick;
+    card.onkeydown = e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        pick();
+      }
+    };
+  });
+}
+function updateTarget(el, ok){
+  if (!el) return;
+  el.classList.toggle('ok', ok);
+  el.classList.toggle('warn', !ok);
+}
+function renderPriorityPanel(total, bluePct, lowPct){
+  const target = styleTargets[currentStyle] || {label:currentStyle || '未配置风格线', posts:0, blue:0, low:0};
+  const m = styleMetrics(currentStyle);
+  $('#targetBluePct').textContent = `${m.blue} / ${target.blue}`;
+  $('#targetLowPct').textContent = `${m.low} / ${target.low}`;
+  $('#targetBlueHint').textContent = `${target.label}：发稿 ${m.total}/${target.posts}，蓝海覆盖 ${m.total ? Math.round(m.blue / m.total * 100) : 0}%（目标 ${target.blue}/${target.posts}）`;
+  $('#targetLowHint').textContent = `${target.label}：低价覆盖 ${m.total ? Math.round(m.low / m.total * 100) : 0}%（目标 ${target.low}/${target.posts}）`;
+  updateTarget($('#targetBlue'), m.blue === target.blue && m.total === target.posts);
+  updateTarget($('#targetLow'), m.low === target.low && m.total === target.posts);
+  const scoped = products.filter(p => productAvailableForAccount(p, currentAccount) && passExtraFilters(p));
+  const nonBlueCount = scoped.filter(p => isNonBlueZone(p, currentAccount)).length;
+  const blueCount = scoped.filter(p => isBlueZone(p, currentAccount)).length;
+  const lowCount = scoped.filter(p => effectiveLow(p, currentAccount)).length;
+  const nonLowCount = scoped.filter(p => !effectiveLow(p, currentAccount)).length;
+  const p0Count = scoped.filter(p => p.pLevel === 'P0').length;
+  const p1Count = scoped.filter(p => p.pLevel === 'P1').length;
+  $('#nonBlueCount').textContent = `${nonBlueCount} 个候选`;
+  $('#blueCount').textContent = `${blueCount} 个候选`;
+  $('#lowCount').textContent = `${lowCount} 个候选`;
+  $('#nonLowCount').textContent = `${nonLowCount} 个候选`;
+  $('#p0Count').textContent = `${p0Count} 个候选`;
+  $('#p1Count').textContent = `${p1Count} 个候选`;
+}
+function productLink(p){
+  const entries = Object.entries(p?.raw || {});
+  const preferred = entries.find(([k, v]) => /pdp|商品链接|商品url|product\s*link|链接/i.test(k) && urlFromText(v));
+  if (preferred) return urlFromText(preferred[1]);
+  const any = entries.find(([k, v]) => !/图片|image|img|主图|封面/i.test(k) && urlFromText(v));
+  return any ? urlFromText(any[1]) : '';
+}
+function imageExportNote(p){
+  if (!p.image) return '无图片';
+  if (/^https?:\/\//i.test(p.image)) return '外部图片URL，可点击打开';
+  if (/^data:image\//i.test(p.image)) return '图片已以Data URL保留';
+  if (/^blob:/i.test(p.image)) return '原表内嵌图片，Excel无稳定URL；请用HTML导出直接看图';
+  return '图片可在页面预览';
+}
+function selectedRows(){
+  return Array.from(selected.values()).map(x => {
+    const acc = accountForName(x.account);
+    const p = x.product;
+    return {acc, pick:x, product:p, style:acc?.style || '', account:x.account, pid:p.pid, title:p.title, image:p.image, productLink:productLink(p), score:x.score, reason:x.ruleLabel || reason(p, acc, x.score)};
+  }).sort((a,b) => styleOrder.indexOf(a.style) - styleOrder.indexOf(b.style) || a.account.localeCompare(b.account, 'zh-Hans') || String(a.pid).localeCompare(String(b.pid)));
+}
+function selectedExportRows(){
+  return selectedRows().map(x => ({
+    风格线: x.style,
+    账号: x.account,
+    PID: x.pid,
+    商品名称: x.title,
+    图片URL: /^https?:\/\//i.test(x.image || '') ? x.image : '',
+    图片预览说明: imageExportNote(x.product),
+    PDP链接: x.productLink,
+    货盘: x.product.market,
+    尺码类型: x.product.sizeType,
+    品类区分: x.product.productType,
+    GMV: x.product.gmv,
+    增速: x.product.growth,
+    算法分: x.product.algoScore,
+    短视频GMV占比: x.product.videoShare ? `${fmtMetric(x.product.videoShare, '%')}` : '',
+    P指标: x.product.pLevel || '',
+    P指标命中项: (x.product.pHits || []).join('、'),
+    生命周期标签: x.product.lifecycle || '',
+    是否蓝海: isBlueZone(x.product, x.acc)?'是':'否',
+    是否近期低价: effectiveLow(x.product, x.acc)?'是':'否',
+    推荐类型: x.reason,
+    推荐分: x.score
+  }));
+}
+function switchToSelected(row){
+  if (row.style) currentStyle = row.style;
+  const acc = accountForName(row.account);
+  if (acc) currentAccount = acc;
+  selectedPanelOpen = false;
+  renderAll();
+  document.querySelector(`[data-card-pick="${CSS.escape(row.product.uid)}"]`)?.scrollIntoView({behavior:'smooth', block:'center'});
+}
+function removeSelected(account, uid){
+  selected.delete(`${account}::${uid}`);
+  renderAll();
+}
+function renderSelectedPanel(){
+  const panel = $('#selectedPanel');
+  const btn = $('#selectedPanelBtn');
+  if (!panel || !btn) return;
+  const rows = selectedRows();
+  panel.classList.toggle('show', selectedPanelOpen && rows.length > 0);
+  btn.textContent = selectedPanelOpen ? '收起已选品' : `查看已选品（${rows.length}）`;
+  $('#selectedSummaryText').textContent = rows.length ? `共 ${rows.length} 个；可在清单里切换账号定位或移除` : '还没有已选商品';
+  if (!rows.length) { $('#selectedList').innerHTML = '<div class="empty">还没有已选商品。点击商品卡片后会出现在这里。</div>'; return; }
+  const groups = new Map();
+  rows.forEach(row => {
+    const key = `${row.style} / ${row.account}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  $('#selectedList').innerHTML = Array.from(groups.entries()).map(([group, items]) => `
+    <div class="selected-group">
+      <div class="selected-group-title">${esc(group)} · ${items.length} 个</div>
+      ${items.map(row => `
+        <article class="selected-item">
+          <div class="selected-thumb">${row.image ? `<img src="${esc(row.image)}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'noimg',textContent:'图片失败'}))">` : '无图'}</div>
+          <div class="selected-info">
+            <div class="selected-title">${esc(row.pid)} · ${esc(row.title)}</div>
+            <div class="selected-meta">
+              <span class="chip">${esc(row.product.market || '货盘未识别')}</span>
+              <span class="chip">${esc(row.product.sizeType || '尺码未识别')}</span>
+              <span class="chip">${esc(row.product.productType || '品类未识别')}</span>
+              <span class="chip ${isBlueZone(row.product, row.acc) ? 'good' : 'bad'}">${isBlueZone(row.product, row.acc) ? '蓝海' : '非蓝海'}</span>
+              <span class="chip ${effectiveLow(row.product, row.acc) ? 'good' : 'bad'}">${effectiveLow(row.product, row.acc) ? '低价' : '非低价'}</span>
+              ${row.product.pLevel ? `<span class="chip good">${esc(row.product.pLevel)}</span>` : ''}
+              ${row.image && !/^https?:\/\//i.test(row.image) ? '<span class="chip bad">内嵌图无公网URL</span>' : ''}
+            </div>
+          </div>
+          <div class="selected-actions">
+            <button class="mini-btn" data-jump-selected="${esc(row.account)}::${esc(row.product.uid)}">定位</button>
+            <button class="mini-btn" data-remove-selected="${esc(row.account)}::${esc(row.product.uid)}">移除</button>
+          </div>
+        </article>
+      `).join('')}
+    </div>
+  `).join('');
+  $$('[data-remove-selected]').forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    const [account, uid] = btn.dataset.removeSelected.split('::');
+    removeSelected(account, uid);
+  });
+  $$('[data-jump-selected]').forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    const [account, uid] = btn.dataset.jumpSelected.split('::');
+    const row = rows.find(x => x.account === account && x.product.uid === uid);
+    if (row) switchToSelected(row);
+  });
+}
+function renderStats(){
+  const vals = Array.from(selected.values()); const total = vals.length;
+  const blueCount = vals.filter(x=>isBlueZone(x.product, accountForName(x.account))).length;
+  const lowCount = vals.filter(x=>effectiveLow(x.product, accountForName(x.account))).length;
+  const blue = total ? Math.round(blueCount / total * 100) : 0;
+  const low = total ? Math.round(lowCount / total * 100) : 0;
+  const allStylesDone = styleOrder.every(styleComplete);
+  const status = !total ? '未开始' : (allStylesDone ? '可复核' : '待补齐');
+  $('#statProducts').textContent = products.length;
+  $('#statSelected').textContent = `${total} / ${getTotalQuota()}`;
+  $('#statBlue').textContent = `${blueCount} 个 / ${blue}%`;
+  $('#statLow').textContent = `${lowCount} 个 / ${low}%`;
+  $('#statReady').textContent = status;
+  $('#exportBtn').disabled = total === 0;
+  $('#clearSelectedBtn').disabled = total === 0;
+  $('#undoClearBtn').disabled = !lastClearedSelected || !lastClearedSelected.size;
+  $('#clearCurrentAccountBtn').disabled = accountSelected(currentAccount).length === 0;
+  $('#selectedPanelBtn').disabled = total === 0;
+  if (!total) selectedPanelOpen = false;
+  renderPriorityPanel(total, blue, low);
+}
+function renderAll(){ renderStyles(); renderAccounts(); renderProducts(); renderStats(); renderSelectedPanel(); }
+async function parseWorkbookData(data, fileName='品池表格.xlsx', options={}){
+  const silent = !!options.silent;
+  clearEmbeddedImageUrls();
+  try {
+    const wb = XLSX.read(data, {type:'array'});
+    if (/\.xlsx$/i.test(fileName)) {
+      try { embeddedImagesByRow = await extractXlsxEmbeddedImages(data, wb); }
+      catch (err) { console.warn('embedded image parse failed', err); embeddedImagesByRow = {}; }
+    } else {
+      embeddedImagesByRow = {};
+    }
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rawRows = rowsFromWorksheet(ws);
+    if (!rawRows.length) {
+      if (!silent) toast('表格为空，换一个文件试试');
+      return false;
+    }
+    autoMapping(Object.keys(rawRows[0])); buildMapping(); normalizeProducts(); selected.clear(); lastClearedSelected = null;
+    activeFilters = new Set([]); searchQuery = ''; marketFilterValue = 'all'; sizeFilterValue = 'all'; productTypeFilterValue = 'all';
+    $('#searchInput').value = ''; $('#marketFilter').value = 'all'; $('#sizeFilter').value = 'all'; $('#productTypeFilter').value = 'all';
+    $('#autoBtn').disabled = false; $('#mappingBtn').disabled = false; renderAll();
+    const imageCount = products.filter(p => p.image).length;
+    toast(silent ? `已自动加载默认品池：${rawRows.length} 个商品，识别图片 ${imageCount} 张` : `已读取 ${rawRows.length} 个商品，识别图片 ${imageCount} 张`);
+    return true;
+  } catch (err) {
+    console.error(err);
+    if (!silent) toast('表格读取失败，请检查文件格式或改传 xlsx/csv');
+    return false;
+  }
+}
+function parseFile(file){
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const data = new Uint8Array(e.target.result);
+    await parseWorkbookData(data, file.name);
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function loadDefaultPool(){
+  try {
+    const res = await fetch('product_pool.xlsx', {cache:'no-store'});
+    if (!res.ok) return;
+    const buffer = await res.arrayBuffer();
+    await parseWorkbookData(new Uint8Array(buffer), 'product_pool.xlsx', {silent:true});
+  } catch (err) {
+    console.info('默认品池未加载，可手动上传表格', err);
+  }
+}
+async function blobToDataUrl(blob){
+  return await new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(blob);
+  });
+}
+async function imageForHtml(src){
+  if (!src) return '';
+  if (/^data:image\//i.test(src)) return src;
+  if (/^blob:/i.test(src)) {
+    try { return await blobToDataUrl(await fetch(src).then(r => r.blob())); }
+    catch (err) { return src; }
+  }
+  return src;
+}
+async function imageForExcel(src){
+  if (!src) return null;
+  try {
+    if (/^data:image\//i.test(src)) return src;
+    if (/^blob:/i.test(src)) return await blobToDataUrl(await fetch(src).then(r => r.blob()));
+    if (/^https?:\/\//i.test(src)) {
+      const blob = await fetch(src, {mode:'cors'}).then(r => r.ok ? r.blob() : Promise.reject(new Error('image fetch failed')));
+      return await blobToDataUrl(blob);
+    }
+  } catch (err) {
+    console.warn('image embed failed', err);
+  }
+  return null;
+}
+function imageExtension(dataUrl){
+  const m = String(dataUrl || '').match(/^data:image\/(png|jpe?g|gif|webp);/i);
+  if (!m) return 'png';
+  return m[1].toLowerCase().replace('jpeg','jpg');
+}
+function safeSheetName(name){
+  return (norm(name) || '未分组').replace(/[\/?*\[\]:]/g, ' ').slice(0, 31);
+}
+async function exportSelectedHtml(){
+  const rows = selectedRows();
+  const enriched = await Promise.all(rows.map(async row => ({...row, htmlImage: await imageForHtml(row.image)})));
+  const grouped = new Map();
+  enriched.forEach(row => {
+    const key = `${row.style} / ${row.account}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+  const body = Array.from(grouped.entries()).map(([group, items]) => `
+    <section class="group">
+      <h2>${esc(group)} <span>${items.length} 个</span></h2>
+      <div class="grid">
+        ${items.map(row => `
+          <article class="card">
+            <div class="pic">${row.htmlImage ? `<img src="${esc(row.htmlImage)}" alt="">` : '<span>无图</span>'}</div>
+            <div class="body">
+              <h3>${esc(row.title)}</h3>
+              <p class="pid">PID：${esc(row.pid)}</p>
+              <p>${esc(row.product.market || '货盘未识别')} · ${esc(row.product.sizeType || '尺码未识别')} · ${esc(row.product.productType || '品类未识别')}</p>
+              <p>${isBlueZone(row.product, row.acc) ? '蓝海' : '非蓝海'} · ${effectiveLow(row.product, row.acc) ? '低价' : '非低价'}${row.product.pLevel ? ` · ${esc(row.product.pLevel)}` : ''}</p>
+              ${row.productLink ? `<a href="${esc(row.productLink)}" target="_blank">打开PDP链接</a>` : ''}
+              ${/^https?:\/\//i.test(row.image || '') ? `<a href="${esc(row.image)}" target="_blank">打开图片URL</a>` : '<p class="note">图片来自原表内嵌图，已尽量写入本HTML预览。</p>'}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `).join('');
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>今日女装选品图片清单</title><style>
+    body{margin:0;background:#08101d;color:#eaf2ff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px} h1{margin:0 0 8px;font-size:28px} .sub{color:#91a2bd;margin:0 0 22px}.group{margin:0 0 28px}h2{font-size:18px;margin:0 0 12px;color:#35d5ff}h2 span{color:#91a2bd;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid rgba(143,163,199,.22);border-radius:18px;overflow:hidden;background:#10182a}.pic{aspect-ratio:1/1;background:#0b1324;display:grid;place-items:center;color:#91a2bd}.pic img{width:100%;height:100%;object-fit:cover}.body{padding:12px}.body h3{font-size:14px;line-height:1.3;margin:0 0 8px}.body p{margin:5px 0;color:#b8c5d8;font-size:12px}.pid{color:#2ff0a8!important;font-weight:800}a{display:inline-block;margin:6px 8px 0 0;color:#35d5ff;font-size:12px}.note{color:#ff8aa9!important}
+  </style></head><body><h1>今日女装选品图片清单</h1><p class="sub">共 ${rows.length} 个已选品；HTML 导出用于直接看图复核，Excel 导出用于正式表格流转。</p>${body}</body></html>`;
+  downloadBlob(html, `今日女装选品_图片清单_${new Date().toISOString().slice(0,10)}.html`, 'text/html;charset=utf-8;');
+}
+function downloadBlob(content, filename, type){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], {type}));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+async function exportExcelWithImages(){
+  if (!window.ExcelJS) {
+    toast('图片版 Excel 组件加载失败，已改用普通 Excel 导出');
+    return false;
+  }
+  const rows = selectedRows();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = '每日选品可视化工作台';
+  workbook.created = new Date();
+  const grouped = new Map();
+  rows.forEach(row => {
+    const key = row.style || '未分组';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+  for (const [style, items] of grouped.entries()) {
+    const sheet = workbook.addWorksheet(safeSheetName(style));
+    sheet.columns = [
+      {header:'商品图片', key:'imageBox', width:14},
+      {header:'风格线', key:'style', width:16},
+      {header:'账号', key:'account', width:20},
+      {header:'PID', key:'pid', width:20},
+      {header:'商品名称', key:'title', width:34},
+      {header:'图片URL', key:'imageUrl', width:24},
+      {header:'图片说明', key:'imageNote', width:26},
+      {header:'PDP链接', key:'pdp', width:24},
+      {header:'货盘', key:'market', width:10},
+      {header:'尺码类型', key:'sizeType', width:10},
+      {header:'品类区分', key:'productType', width:10},
+      {header:'GMV', key:'gmv', width:10},
+      {header:'增速', key:'growth', width:10},
+      {header:'算法分', key:'algoScore', width:10},
+      {header:'短视频GMV占比', key:'videoShare', width:14},
+      {header:'P指标', key:'pLevel', width:9},
+      {header:'P指标命中项', key:'pHits', width:24},
+      {header:'生命周期标签', key:'lifecycle', width:16},
+      {header:'是否蓝海', key:'blue', width:10},
+      {header:'是否近期低价', key:'low', width:12},
+      {header:'推荐类型', key:'reason', width:28},
+      {header:'推荐分', key:'score', width:10}
+    ];
+    sheet.getRow(1).height = 24;
+    sheet.getRow(1).font = {bold:true, color:{argb:'FFFFFFFF'}};
+    sheet.getRow(1).fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF111827'}};
+    sheet.getRow(1).alignment = {vertical:'middle', horizontal:'center'};
+    sheet.views = [{state:'frozen', ySplit:1}];
+    for (const row of items) {
+      const dataRow = sheet.addRow({
+        imageBox: row.image ? '图片' : '无图',
+        style: row.style,
+        account: row.account,
+        pid: row.pid,
+        title: row.title,
+        imageUrl: /^https?:\/\//i.test(row.image || '') ? row.image : '',
+        imageNote: imageExportNote(row.product),
+        pdp: row.productLink,
+        market: row.product.market,
+        sizeType: row.product.sizeType,
+        productType: row.product.productType,
+        gmv: row.product.gmv,
+        growth: row.product.growth,
+        algoScore: row.product.algoScore,
+        videoShare: row.product.videoShare ? `${fmtMetric(row.product.videoShare, '%')}` : '',
+        pLevel: row.product.pLevel || '',
+        pHits: (row.product.pHits || []).join('、'),
+        lifecycle: row.product.lifecycle || '',
+        blue: isBlueZone(row.product, row.acc) ? '是' : '否',
+        low: effectiveLow(row.product, row.acc) ? '是' : '否',
+        reason: row.reason,
+        score: row.score
+      });
+      dataRow.height = 60;
+      dataRow.alignment = {vertical:'middle', wrapText:true};
+      if (row.image && /^https?:\/\//i.test(row.image)) dataRow.getCell('imageUrl').value = {text:'打开图片', hyperlink:row.image};
+      if (row.productLink) dataRow.getCell('pdp').value = {text:'打开商品', hyperlink:row.productLink};
+      const img = await imageForExcel(row.image);
+      if (img) {
+        const imageId = workbook.addImage({base64: img, extension: imageExtension(img)});
+        sheet.addImage(imageId, {tl:{col:0.15, row:dataRow.number - 0.88}, ext:{width:64, height:64}, editAs:'oneCell'});
+        dataRow.getCell('imageBox').value = '';
+      }
+    }
+    sheet.eachRow(row => row.eachCell(cell => {
+      cell.border = {top:{style:'thin', color:{argb:'FFE5E7EB'}}, left:{style:'thin', color:{argb:'FFE5E7EB'}}, bottom:{style:'thin', color:{argb:'FFE5E7EB'}}, right:{style:'thin', color:{argb:'FFE5E7EB'}}};
+      cell.alignment = {...(cell.alignment || {}), vertical:'middle', wrapText:true};
+    }));
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(buffer, `今日女装选品_带图片_${new Date().toISOString().slice(0,10)}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  return true;
+}
+async function exportData(){
+  const vals = selectedExportRows();
+  if (!vals.length) return;
+  if ($('#exportMode').value === 'html') {
+    await exportSelectedHtml();
+    return;
+  }
+  if ($('#exportMode').value === 'xlsx') {
+    const ok = await exportExcelWithImages();
+    if (ok) return;
+    const wb = XLSX.utils.book_new();
+    [...new Set(vals.map(v=>v.风格线))].forEach(style => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vals.filter(v=>v.风格线===style)), style.slice(0,31)));
+    XLSX.writeFile(wb, `今日女装选品_${new Date().toISOString().slice(0,10)}.xlsx`);
+  } else {
+    [...new Set(vals.map(v=>v.风格线))].forEach(style => {
+      const ws = XLSX.utils.json_to_sheet(vals.filter(v=>v.风格线===style));
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      downloadBlob(csv, `${style}_今日选品.csv`, 'text/csv;charset=utf-8;');
+    });
+  }
+}
+function loadSample(){
+  const fashionImages = [
+    'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1542060748-10c28b62716f?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1549570652-97324981a6fd?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1551232864-3f0890e580d9?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1560243563-062bfc001d68?auto=format&fit=crop&w=640&q=80',
+    'https://images.unsplash.com/photo-1566206091558-7f218b696731?auto=format&fit=crop&w=640&q=80'
+  ];
+  rawRows = Array.from({length: 72}).map((_,i) => {
+    const styles = ['甜辣风','Modest Daily','成熟优雅风','跨风格引流型']; const style = styles[i%4];
+    return {PID:`P${String(860000+i).padStart(6,'0')}`, 商品名称:`${style} 推荐款 ${i+1}`, 图片URL:fashionImages[i % fashionImages.length], GMV: Math.round(1000 + Math.random()*90000), 增速: Math.round(Math.random()*85), 风格线: style, 货盘: i%2 ? 'US货盘' : 'DE货盘', 是否蓝海: i%6===0?'浅海':(i%3!==0?'是':'否'), 是否近期低价: i%4!==0?'是':'否', 尺码: i%3 ? '标码' : '大码', 类目: i%5 ? '女装' : '鞋包', '算法选品分(video_score_v3)': Math.round(Math.random()*100)/100, 短视频GMV占比: `${Math.round(Math.random()*90)}%`, 商品生命周期标签: i%4===0?'大爆':(i%4===1?'爆品':'普通')};
+  });
+  autoMapping(Object.keys(rawRows[0])); buildMapping(); normalizeProducts(); selected.clear(); lastClearedSelected = null; searchQuery = ''; activeFilters = new Set([]); marketFilterValue = 'all'; sizeFilterValue = 'all'; productTypeFilterValue = 'all'; $('#searchInput').value = ''; $('#marketFilter').value = 'all'; $('#sizeFilter').value = 'all'; $('#productTypeFilter').value = 'all'; $('#autoBtn').disabled=false; $('#mappingBtn').disabled=false; renderAll(); toast('示例已加载，可以点击自动匹配');
+}
+
+$('#fileInput').addEventListener('change', e => e.target.files[0] && parseFile(e.target.files[0]));
+$('#dropZone').addEventListener('dragover', e => { e.preventDefault(); $('#dropZone').classList.add('drag'); });
+$('#dropZone').addEventListener('dragleave', () => $('#dropZone').classList.remove('drag'));
+$('#dropZone').addEventListener('drop', e => { e.preventDefault(); $('#dropZone').classList.remove('drag'); e.dataTransfer.files[0] && parseFile(e.dataTransfer.files[0]); });
+$('#autoBtn').onclick = autoRecommend; $('#sampleBtn').onclick = loadSample; $('#exportBtn').onclick = exportData; $('#clearSelectedBtn').onclick = clearSelectedProducts; $('#undoClearBtn').onclick = undoClearSelectedProducts; $('#clearCurrentAccountBtn').onclick = clearCurrentAccountProducts; $('#selectedPanelBtn').onclick = () => { selectedPanelOpen = !selectedPanelOpen; renderSelectedPanel(); document.querySelector('#selectedPanel')?.scrollIntoView({behavior:'smooth', block:'start'}); };
+$('#mappingBtn').onclick = () => $('#mappingBox').classList.toggle('show');
+$('#configBtn').onclick = () => { renderConfigPanel(); $('#configPanel').classList.toggle('show'); };
+$$('.pill[data-filter]').forEach(p => p.onclick = () => { toggleFilter(p.dataset.filter); renderProducts(); renderStats(); });
+$$('[data-clear-filters]').forEach(p => p.onclick = () => { setFilterCombo([]); renderProducts(); renderStats(); });
+$('#searchInput').addEventListener('input', e => { searchQuery = e.target.value; renderProducts(); renderStats(); });
+$('#clearSearchBtn').onclick = () => { searchQuery = ''; $('#searchInput').value = ''; renderProducts(); renderStats(); };
+$('#marketFilter').addEventListener('change', e => { marketFilterValue = e.target.value; renderProducts(); renderStats(); });
+$('#sizeFilter').addEventListener('change', e => { sizeFilterValue = e.target.value; renderProducts(); renderStats(); });
+$('#productTypeFilter').addEventListener('change', e => { productTypeFilterValue = e.target.value; renderProducts(); renderStats(); });
+$$('[data-jump-filter]').forEach(card => card.onclick = () => {
+  setFilterCombo([card.dataset.jumpFilter]);
+  renderProducts();
+  renderStats();
+  document.querySelector('.main')?.scrollIntoView({behavior:'smooth', block:'start'});
+});
+renderConfigPanel();
+renderAll();
+loadDefaultPool();
+</script>
+</body>
+</html>
